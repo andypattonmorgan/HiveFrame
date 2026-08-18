@@ -1,0 +1,341 @@
+"""Data model and loader for HiveFrame.
+
+One TOML file per project. The file is the contract: it is diffable, greppable,
+editable by hand, and readable without this application. If the UI is thrown
+away, nothing is lost.
+
+Two stores, work and personal, resolved from separate roots. The boundary is
+enforced here rather than in the UI, because a boundary enforced at the display
+layer is a boundary that leaks the first time someone adds a view.
+"""
+
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from pathlib import Path
+
+STORES = ("work", "personal")
+
+# Relation types. Only "blocks" and "feeds" drive behaviour; the rest record
+# meaning. Keeping them distinct is the point: an untyped edge says two things
+# are related without saying what follows from that.
+RELATION_TYPES = ("feeds", "blocks", "shares-evidence", "supersedes", "informs")
+
+# A relation proposed by the assistant has no effect until a human confirms it.
+RELATION_STATUS = ("suggested", "confirmed", "rejected")
+
+
+class StoreError(RuntimeError):
+    """Raised when a caller reaches for a store it is not allowed to see."""
+
+
+@dataclass
+class Artifact:
+    label: str
+    path: str = ""
+    url: str = ""
+    kind: str = "doc"
+
+    @property
+    def exists(self) -> bool:
+        if not self.path:
+            return False
+        return Path(self.path).expanduser().exists()
+
+
+@dataclass
+class Task:
+    id: str
+    title: str
+    status: str = "open"          # open | doing | done | dropped
+    due: date | None = None
+    effort_h: float = 0.0
+    urgent: bool = False
+    important: bool = False
+    blocked_by: list[str] = field(default_factory=list)
+    note: str = ""
+
+    @property
+    def open(self) -> bool:
+        return self.status in ("open", "doing")
+
+    def days_left(self, today: date | None = None) -> int | None:
+        if self.due is None:
+            return None
+        return (self.due - (today or date.today())).days
+
+
+@dataclass
+class Relation:
+    to: str
+    type: str = "informs"
+    status: str = "suggested"
+    note: str = ""
+
+
+@dataclass
+class Charter:
+    """The defining context. Kept on screen at all times in the project view.
+
+    Drift happens when the goal is out of sight, so this is not collapsible and
+    not on a second tab.
+    """
+    problem: str = ""
+    hypothesis: str = ""
+    goal: str = ""
+    kill_when: str = ""
+    done_when: str = ""
+    constraints: list[str] = field(default_factory=list)
+
+    @property
+    def complete(self) -> bool:
+        return bool(self.problem and self.goal and self.done_when)
+
+    @property
+    def missing(self) -> list[str]:
+        gaps = []
+        for name in ("problem", "hypothesis", "goal", "kill_when", "done_when"):
+            if not getattr(self, name):
+                gaps.append(name)
+        return gaps
+
+
+@dataclass
+class Project:
+    id: str
+    name: str
+    kind: str = "initiative"      # initiative | experiment | commitment | admin
+    horizon: str = ""             # H1 | H2 | H3
+    status: str = "active"        # active | paused | done | killed
+    store: str = "work"
+    started: date | None = None
+    charter: Charter = field(default_factory=Charter)
+    artifacts: list[Artifact] = field(default_factory=list)
+    tasks: list[Task] = field(default_factory=list)
+    relations: list[Relation] = field(default_factory=list)
+    source_file: Path | None = None
+
+    @property
+    def open_tasks(self) -> list[Task]:
+        return [t for t in self.tasks if t.open]
+
+    @property
+    def open_effort_h(self) -> float:
+        return sum(t.effort_h for t in self.open_tasks)
+
+    @property
+    def confirmed_relations(self) -> list[Relation]:
+        return [r for r in self.relations if r.status == "confirmed"]
+
+    @property
+    def pending_relations(self) -> list[Relation]:
+        return [r for r in self.relations if r.status == "suggested"]
+
+    def next_due(self) -> date | None:
+        dates = [t.due for t in self.open_tasks if t.due]
+        return min(dates) if dates else None
+
+
+def _as_date(value) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value))
+
+
+def load_project(path: Path) -> Project:
+    raw = tomllib.loads(path.read_text())
+    p = raw.get("project", {})
+
+    charter = Charter(**{k: v for k, v in raw.get("charter", {}).items()
+                         if k in Charter.__dataclass_fields__})
+
+    artifacts = [Artifact(**{k: v for k, v in a.items()
+                             if k in Artifact.__dataclass_fields__})
+                 for a in raw.get("artifact", [])]
+
+    tasks = []
+    for t in raw.get("task", []):
+        t = dict(t)
+        t["due"] = _as_date(t.get("due"))
+        tasks.append(Task(**{k: v for k, v in t.items()
+                             if k in Task.__dataclass_fields__}))
+
+    relations = [Relation(**{k: v for k, v in r.items()
+                             if k in Relation.__dataclass_fields__})
+                 for r in raw.get("relation", [])]
+
+    return Project(
+        id=p.get("id", path.stem),
+        name=p.get("name", path.stem),
+        kind=p.get("kind", "initiative"),
+        horizon=p.get("horizon", ""),
+        status=p.get("status", "active"),
+        store=p.get("store", "work"),
+        started=_as_date(p.get("started")),
+        charter=charter,
+        artifacts=artifacts,
+        tasks=tasks,
+        relations=relations,
+        source_file=path,
+    )
+
+
+class Board:
+    """All projects from one or more stores.
+
+    Callers name the stores they want. A work view that never asks for the
+    personal store cannot accidentally receive it, and asking for an unknown
+    store is an error rather than an empty result.
+    """
+
+    def __init__(self, roots: dict[str, Path]):
+        self.roots = {k: Path(v).expanduser() for k, v in roots.items()}
+        for name in self.roots:
+            if name not in STORES:
+                raise StoreError(f"unknown store: {name}")
+
+    @classmethod
+    def from_env(cls) -> "Board":
+        roots = {}
+        work = os.environ.get("HIVEFRAME_WORK")
+        personal = os.environ.get("HIVEFRAME_PERSONAL")
+        if work:
+            roots["work"] = Path(work)
+        if personal:
+            roots["personal"] = Path(personal)
+        if not roots:
+            roots["work"] = Path(__file__).resolve().parents[1] / "example" / "projects"
+        return cls(roots)
+
+    def load(self, stores: tuple[str, ...] = ("work",)) -> list[Project]:
+        for s in stores:
+            if s not in STORES:
+                raise StoreError(f"unknown store: {s}")
+        out: list[Project] = []
+        for name in stores:
+            root = self.roots.get(name)
+            if not root or not root.exists():
+                continue
+            for f in sorted(root.glob("*.toml")):
+                proj = load_project(f)
+                # The file's own store field cannot promote it into a store the
+                # caller did not ask for. The directory it lives in decides.
+                proj.store = name
+                out.append(proj)
+        return out
+
+
+def capacity(projects: list[Project], weekly_hours: float,
+             horizon_days: int = 28, today: date | None = None) -> dict:
+    """Fixed weekly budget against committed effort.
+
+    Fixed rather than calendar-derived on purpose: cruder, and it always works.
+    Move to calendar-derived only if the fixed number proves too blunt.
+
+    Estimates are wrong at first. Logged focus sessions produce actual hours,
+    so the correction is measured later rather than guessed now.
+    """
+    today = today or date.today()
+    end = today + timedelta(days=horizon_days)
+    available = weekly_hours * (horizon_days / 7.0)
+
+    committed = 0.0
+    undated = 0.0
+    at_risk: list[dict] = []
+
+    for p in projects:
+        if p.status not in ("active",):
+            continue
+        for t in p.open_tasks:
+            if t.due is None:
+                undated += t.effort_h
+                continue
+            if t.due > end:
+                continue
+            committed += t.effort_h
+            days = max((t.due - today).days, 0)
+            hours_before_due = weekly_hours * (days / 7.0)
+            if t.effort_h > hours_before_due:
+                at_risk.append({
+                    "project": p.id,
+                    "project_name": p.name,
+                    "task": t.id,
+                    "title": t.title,
+                    "due": t.due.isoformat(),
+                    "days_left": days,
+                    "effort_h": t.effort_h,
+                    "hours_available": round(hours_before_due, 1),
+                })
+
+    return {
+        "window_days": horizon_days,
+        "weekly_hours": weekly_hours,
+        "available_h": round(available, 1),
+        "committed_h": round(committed, 1),
+        "undated_h": round(undated, 1),
+        "overcommitted_by_h": round(max(committed - available, 0), 1),
+        "overcommitted": committed > available,
+        "at_risk": sorted(at_risk, key=lambda r: r["days_left"]),
+    }
+
+
+def score(project: Project, today: date | None = None) -> tuple[float, list[str]]:
+    """Rank a project, and say why.
+
+    The reasons are returned with the number because a priority with no visible
+    reason is an instruction, and a priority with a reason is an argument that
+    can be rejected.
+    """
+    today = today or date.today()
+    pts = 0.0
+    why: list[str] = []
+
+    if project.status != "active":
+        return 0.0, ["not active"]
+
+    due = project.next_due()
+    if due is not None:
+        days = (due - today).days
+        if days < 0:
+            pts += 40
+            why.append(f"overdue by {abs(days)}d")
+        elif days <= 7:
+            pts += 30 - days
+            why.append(f"due in {days}d")
+        elif days <= 28:
+            pts += 8
+            why.append(f"due in {days}d")
+
+    urgent = [t for t in project.open_tasks if t.urgent]
+    important = [t for t in project.open_tasks if t.important]
+    if urgent:
+        pts += 20
+        why.append(f"{len(urgent)} marked urgent")
+    if important:
+        pts += 10
+        why.append(f"{len(important)} marked important")
+
+    # An item other work waits on outranks an item nothing waits on.
+    blocks = [r for r in project.confirmed_relations if r.type == "blocks"]
+    if blocks:
+        pts += 15 * len(blocks)
+        why.append(f"blocks {len(blocks)} other project(s)")
+
+    if project.pending_relations:
+        pts += 3
+        why.append(f"{len(project.pending_relations)} relation(s) awaiting a verdict")
+
+    if not project.charter.complete:
+        pts += 5
+        why.append("charter incomplete")
+
+    if not project.open_tasks:
+        pts -= 10
+        why.append("no open tasks")
+
+    return pts, why

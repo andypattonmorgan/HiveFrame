@@ -1,0 +1,35 @@
+name: hiveframe
+owner: D112236
+stage: phase-1
+access_mode: read-only
+description: >
+  Private working surface for holding many project threads without context
+  bleed. Each project carries its own charter, tasks, artifacts and declared
+  relations. HiveLab publishes outward; HiveFrame holds the work.
+
+systems:
+  - name: local filesystem
+    mode: read
+    note: project TOML files in the configured work and personal roots
+  - name: macOS Finder
+    mode: reveal-only
+    note: opens Finder at an artifact path, never launches the file
+
+scopes:
+  - read local project files
+  - reveal a path in Finder
+
+egress:
+  - none
+  - binds 127.0.0.1 only, no external network calls in phase 1
+
+data_classification:
+  work_store: KP internal
+  personal_store: personal, never surfaced in work views or published output
+  repo_contents: no real data, example projects use invented content
+
+writes:
+  - none in phase 1
+  - phase 2 writes only to local project files, never to a system of record
+
+selftest: python3 -m hiveframe.server --selftest
