@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import date
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -68,6 +69,8 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
             "score": round(pts, 1),
             "why": why,
             "open_tasks": len(p.open_tasks),
+            "actionable_tasks": len(p.actionable_tasks),
+            "stalled": p.stalled,
             "open_effort_h": p.open_effort_h,
             "next_due": p.next_due().isoformat() if p.next_due() else None,
             "charter": {
@@ -191,6 +194,13 @@ def selftest() -> int:
         print("  FAIL: a non-work project appeared in a work load")
         return 1
     print("  store boundary holds: work load returned only work projects")
+
+    # A block must not demote a project that still has a move available.
+    probe = replace(projects[0], status="blocked")
+    if probe.actionable_tasks and score(probe)[0] <= score(projects[0])[0]:
+        print("  FAIL: blocking a project with an available move lowered its rank")
+        return 1
+    print("  blocked with a move available ranks above the same project unblocked")
 
     cap = capacity(projects, 10.0)
     print(f"  capacity: {cap['committed_h']}h committed against "

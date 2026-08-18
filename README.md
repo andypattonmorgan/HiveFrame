@@ -98,6 +98,20 @@ Rank rises with: overdue or near-due tasks, manual urgent and important flags,
 blocking other projects, relations awaiting a verdict, an incomplete charter.
 Rank falls when a project has no open tasks.
 
+A project status of `blocked` does not lower rank. Blocked means the work cannot
+proceed right now, not that it stops mattering, and there is nearly always a move
+that attacks the block. A blocked project with at least one available move gains
+25 points, because unblocking releases everything downstream and gets cheaper the
+earlier it happens. Only a project with open work and no available move loses
+anything, and then just 5 points, enough to break a tie and no more.
+
+Live statuses are `active` and `blocked`. Everything else (`paused`, `done`,
+`killed`) scores zero and is excluded from capacity.
+
+A task lists prerequisites in `blocked_by`. A task waiting on an open sibling is
+never offered as a focus candidate, since a candidate you cannot start costs a
+decision and returns nothing.
+
 ## Capacity
 
 A fixed weekly hour budget against the sum of dated, estimated open tasks over a

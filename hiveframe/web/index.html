@@ -361,7 +361,11 @@ let LEN=25*60, left=LEN, tick=null, task=null;
 function drawCandidates(){
   const out=[];
   BOARD.projects.slice(0,3).forEach(p=>{
-    const t=p.tasks.find(x=>x.status==="open"||x.status==="doing");
+    /* Never offer a task that is waiting on a sibling. A candidate you cannot
+       start is worse than no candidate: it costs a decision and returns nothing. */
+    const openIds=new Set(p.tasks.filter(x=>x.status==="open"||x.status==="doing").map(x=>x.id));
+    const t=p.tasks.find(x=>(x.status==="open"||x.status==="doing")
+      && !(x.blocked_by||[]).some(d=>openIds.has(d)));
     if(t) out.push({p,t});
   });
   document.getElementById("cands").innerHTML=out.length?out.map((c,i)=>`

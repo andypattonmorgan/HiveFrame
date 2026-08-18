@@ -27,6 +27,12 @@ RELATION_TYPES = ("feeds", "blocks", "shares-evidence", "supersedes", "informs")
 # A relation proposed by the assistant has no effect until a human confirms it.
 RELATION_STATUS = ("suggested", "confirmed", "rejected")
 
+# Statuses that still carry work. "blocked" is live: something outside my control
+# is in the way, which is a fact about the world, not a reason to rank the project
+# down. There is almost always a move that attacks the block, and that move is
+# usually more urgent than the work it is holding up.
+LIVE_STATUSES = ("active", "blocked")
+
 
 class StoreError(RuntimeError):
     """Raised when a caller reaches for a store it is not allowed to see."""
@@ -109,7 +115,7 @@ class Project:
     name: str
     kind: str = "initiative"      # initiative | experiment | commitment | admin
     horizon: str = ""             # H1 | H2 | H3
-    status: str = "active"        # active | paused | done | killed
+    status: str = "active"        # active | blocked | paused | done | killed
     store: str = "work"
     started: date | None = None
     charter: Charter = field(default_factory=Charter)
@@ -125,6 +131,22 @@ class Project:
     @property
     def open_effort_h(self) -> float:
         return sum(t.effort_h for t in self.open_tasks)
+
+    @property
+    def actionable_tasks(self) -> list[Task]:
+        """Open tasks whose prerequisites are already done.
+
+        These are the moves available right now. A project can be blocked and
+        still have several of them, which is the whole point of the distinction.
+        """
+        open_ids = {t.id for t in self.open_tasks}
+        return [t for t in self.open_tasks
+                if not any(dep in open_ids for dep in t.blocked_by)]
+
+    @property
+    def stalled(self) -> bool:
+        """Live, has open work, and no move available. Nothing I can do today."""
+        return bool(self.open_tasks) and not self.actionable_tasks
 
     @property
     def confirmed_relations(self) -> list[Relation]:
@@ -249,7 +271,7 @@ def capacity(projects: list[Project], weekly_hours: float,
     at_risk: list[dict] = []
 
     for p in projects:
-        if p.status not in ("active",):
+        if p.status not in LIVE_STATUSES:
             continue
         for t in p.open_tasks:
             if t.due is None:
@@ -295,8 +317,11 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
     pts = 0.0
     why: list[str] = []
 
-    if project.status != "active":
-        return 0.0, ["not active"]
+    if project.status not in LIVE_STATUSES:
+        return 0.0, [f"not live ({project.status})"]
+
+    if project.status == "blocked":
+        why.append("blocked externally")
 
     due = project.next_due()
     if due is not None:
@@ -333,6 +358,18 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
     if not project.charter.complete:
         pts += 5
         why.append("charter incomplete")
+
+    # A block is a reason to act, not a reason to wait. If there is a move that
+    # attacks it, promote it: unblocking work releases everything downstream and
+    # gets cheaper the earlier it is done. Only demote when there is genuinely
+    # nothing available, and even then only to break a tie, never to the floor.
+    if project.status == "blocked":
+        if project.actionable_tasks:
+            pts += 25
+            why.append(f"{len(project.actionable_tasks)} move(s) available to unblock it")
+        else:
+            pts -= 5
+            why.append("no move available today")
 
     if not project.open_tasks:
         pts -= 10
