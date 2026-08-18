@@ -66,6 +66,7 @@ Three consequences it addresses directly:
 | `hiveframe/server.py` | Local HTTP service and self test |
 | `hiveframe/web/index.html` | The interface: project rail, project view, brief, triage, capacity, focus timer |
 | `example/projects/*.toml` | Example projects with invented data, so the shape is obvious |
+| `example/projects/tools.toml` | Example tool registry, showing the reference-not-copy shape |
 
 **The file format is the contract.** One TOML per project: diffable, greppable,
 editable by hand, readable without this application. If the UI is replaced,
@@ -189,6 +190,32 @@ Four rules are enforced rather than suggested:
 A relation added by hand arrives confirmed. `suggested` is reserved for
 relations a machine proposed, which is a claim that still needs a verdict.
 
+## Tools
+
+Tools are shared capabilities, declared once in `tools.toml` beside the project
+files. A project references a tool by id in its `uses` list and never copies the
+description, because a connector is not owned by whatever needed it first and
+three copies of a description disagree within a month.
+
+Each entry says what the tool does in one line, where it runs, its access mode
+and its status. A tool nobody can describe in one line is a tool nobody can hand
+over, so the registry view counts those separately.
+
+The registry is sorted by dependant count ascending, so tools nothing depends on
+are the first thing you see. That list is where unkilled work hides: it never
+appeared on a project board because it was never a project.
+
+Two states are worth separating. A tool **used by nothing** is either dead or
+load-bearing and undeclared. A tool **declared but not registered** is a project
+depending on something nothing describes, which is worse.
+
+Retiring is refused while any project still declares the tool, and needs a
+reason. Retiring something another project depends on is how a board loses a
+capability it did not know it was using.
+
+Shared libraries will always show as used by nothing. That is correct, not a
+finding, and the registry says so in the note.
+
 ## Security
 
 No secrets in this repo, in config, or in the page. Credentials for connectors
@@ -200,9 +227,10 @@ data. Sanitised data is not used, because sanitised data leaks.
 
 ## Status
 
-Phase 3. Project model, project view with in-place editing, brief, triage with
-verdicts, capacity, focus timer, interruption capture.
+Phase 4. Project model, project view with in-place editing, brief, triage with
+verdicts, tool registry with a reverse dependency index, capacity, focus timer,
+interruption capture.
 
 Not yet built: connector-fed brief, the relation graph, project-bound chat,
 session logging and effort calibration, and sub-project rows so individual
-tools and hypotheses can be triaged rather than only whole projects.
+hypotheses can be triaged rather than only whole projects.

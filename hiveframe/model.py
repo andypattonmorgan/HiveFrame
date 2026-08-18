@@ -39,6 +39,41 @@ class StoreError(RuntimeError):
 
 
 @dataclass
+class Tool:
+    """A capability that exists independently of any project.
+
+    Tools are declared once in ``tools.toml`` and referenced by projects through
+    ``uses``. They are deliberately not members of a project: a connector is not
+    owned by whatever happened to need it first, and copying its description into
+    three project files guarantees the three copies disagree within a month.
+
+    The registry is worth having for one reason beyond tidiness. Once tools are
+    declared separately, "which tools does nothing depend on" becomes a question
+    the board can answer, and that list is where the unkilled work has been
+    hiding.
+    """
+    id: str
+    name: str = ""
+    does: str = ""                # what it does, one line
+    where: str = ""               # where it runs or what it reads
+    path: str = ""
+    status: str = "active"        # active | experimental | unused | retired
+    access: str = "read-only"     # read-only | read-write-local | write
+    note: str = ""
+
+    @property
+    def exists(self) -> bool:
+        if not self.path:
+            return False
+        return Path(self.path).expanduser().exists()
+
+    @property
+    def documented(self) -> bool:
+        """A tool nobody can describe in one line is a tool nobody can hand over."""
+        return bool(self.does.strip())
+
+
+@dataclass
 class Artifact:
     label: str
     path: str = ""
@@ -122,6 +157,7 @@ class Project:
     artifacts: list[Artifact] = field(default_factory=list)
     tasks: list[Task] = field(default_factory=list)
     relations: list[Relation] = field(default_factory=list)
+    uses: list[str] = field(default_factory=list)   # tool ids, not tool copies
     source_file: Path | None = None
 
     @property
@@ -214,8 +250,39 @@ def load_project(path: Path) -> Project:
         artifacts=artifacts,
         tasks=tasks,
         relations=relations,
+        uses=list(p.get("uses", [])),
         source_file=path,
     )
+
+
+TOOLS_FILE = "tools.toml"
+
+
+def load_tools(root: Path) -> list[Tool]:
+    """Read the tool registry for a store. A missing registry is empty, not an error."""
+    path = root / TOOLS_FILE
+    if not path.exists():
+        return []
+    raw = tomllib.loads(path.read_text())
+    out = []
+    for t in raw.get("tool", []):
+        out.append(Tool(**{k: v for k, v in t.items()
+                           if k in Tool.__dataclass_fields__}))
+    return out
+
+
+def tool_usage(tools: list[Tool], projects: list[Project]) -> dict[str, list[str]]:
+    """Which projects use each tool, and which tools nobody declared.
+
+    The unused list is the point. A tool with no declared user is either
+    genuinely dead, or it is load-bearing and undeclared, and both of those are
+    worth knowing before someone deletes it.
+    """
+    usage: dict[str, list[str]] = {t.id: [] for t in tools}
+    for p in projects:
+        for tid in p.uses:
+            usage.setdefault(tid, []).append(p.id)
+    return usage
 
 
 class Board:
@@ -264,11 +331,24 @@ class Board:
             if not root or not root.exists():
                 continue
             for f in sorted(root.glob("*.toml")):
+                if f.name == TOOLS_FILE:
+                    continue          # the registry is not a project
                 proj = load_project(f)
                 # The file's own store field cannot promote it into a store the
                 # caller did not ask for. The directory it lives in decides.
                 proj.store = name
                 out.append(proj)
+        return out
+
+    def tools(self, stores: tuple[str, ...] = ("work",)) -> list[Tool]:
+        for s in stores:
+            if s not in STORES:
+                raise StoreError(f"unknown store: {s}")
+        out: list[Tool] = []
+        for name in stores:
+            root = self.roots.get(name)
+            if root and root.exists():
+                out.extend(load_tools(root))
         return out
 
 

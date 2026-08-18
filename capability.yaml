@@ -1,6 +1,6 @@
 name: hiveframe
 owner: D112236
-stage: phase-3
+stage: phase-4
 access_mode: read-write-local
 description: >
   Private working surface for holding many project threads without context
@@ -40,9 +40,11 @@ writes:
     scope: regenerated from the model on a structural edit (charter, task, artifact, relation)
     trigger: an explicit edit from the project view
     note: keeps a .bak; hand-written TOML comments do not survive a structural edit
+  - target: tools.toml
+    scope: the tool registry for a store, regenerated on an add, edit or retire
+    trigger: an explicit edit from the tools view
   - target: decisions.jsonl
-    scope: append-only, one record per verdict
-  - target: inbox.jsonl
+    scope: append-only, one record per verdict  - target: inbox.jsonl
     scope: append-only, one record per parked interruption
   - never: any system of record. Every data connector in the suite stays GET-only.
 

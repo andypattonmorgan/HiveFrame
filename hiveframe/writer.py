@@ -73,6 +73,10 @@ def dumps(project) -> str:
     L.append(_kv("store", project.store, 7))
     if project.started:
         L.append(_kv("started", project.started, 7))
+    if project.uses:
+        # Tool ids, not tool descriptions. The registry owns the description, so
+        # there is exactly one place to correct it when it changes.
+        L.append(_kv("uses", project.uses, 7))
 
     c = project.charter
     charter_rows = [(k, getattr(c, k)) for k in
@@ -138,4 +142,42 @@ def save(project, path: Path | None = None) -> Path:
     if target.exists():
         shutil.copy2(target, target.with_suffix(target.suffix + ".bak"))
     target.write_text(dumps(project), encoding="utf-8")
+    return target
+
+
+def dumps_tools(tools) -> str:
+    """Render the tool registry."""
+    L = ["# Tool registry for this store.",
+         "#",
+         "# A tool is a capability that exists independently of any project.",
+         "# Projects reference tools by id in their own `uses` list; they never",
+         "# copy the description, so there is one place to correct it.",
+         "#",
+         "# Fields: does (one line, what it does), where (what it runs against),",
+         "# path, status, access, note."]
+    for t in tools:
+        L.append("")
+        L.append("[[tool]]")
+        L.append(_kv("id", t.id, 7))
+        if t.name:
+            L.append(_kv("name", t.name, 7))
+        if t.does:
+            L.append(_kv("does", t.does, 7))
+        if t.where:
+            L.append(_kv("where", t.where, 7))
+        if t.path:
+            L.append(_kv("path", t.path, 7))
+        L.append(_kv("status", t.status, 7))
+        L.append(_kv("access", t.access, 7))
+        if t.note:
+            L.append(_kv("note", t.note, 7))
+    return "\n".join(L) + "\n"
+
+
+def save_tools(tools, root: Path) -> Path:
+    from .model import TOOLS_FILE
+    target = Path(root) / TOOLS_FILE
+    if target.exists():
+        shutil.copy2(target, target.with_suffix(target.suffix + ".bak"))
+    target.write_text(dumps_tools(tools), encoding="utf-8")
     return target

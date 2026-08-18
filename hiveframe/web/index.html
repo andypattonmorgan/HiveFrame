@@ -166,6 +166,7 @@
       <button class="tab on" data-v="project">Project</button>
       <button class="tab" data-v="brief">Brief</button>
       <button class="tab" data-v="triage">Triage</button>
+      <button class="tab" data-v="tools">Tools</button>
       <button class="tab" data-v="capacity">Capacity</button>
       <span class="spacer"></span>
       <span class="why" id="stamp"></span>
@@ -236,8 +237,85 @@ function draw(){
   const el=document.getElementById("view");
   if(VIEW==="brief") return el.innerHTML=briefView();
   if(VIEW==="triage") return el.innerHTML=triageView();
+  if(VIEW==="tools") return el.innerHTML=toolsView();
   if(VIEW==="capacity") return el.innerHTML=capView();
   el.innerHTML=projectView();
+}
+
+/* ---- tools: shared capabilities, not project members ----
+   A tool is declared once and referenced by id. Ordering is by dependant count
+   ascending, so the tools nothing depends on are the first thing you see. That
+   list is where unkilled work has been hiding: it never appeared on a project
+   board because it was never a project. */
+function toolsView(){
+  const T=BOARD.tools||[], esc=s=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  const orphan=T.filter(t=>!t.used_by.length&&t.status!=="retired");
+  const undocumented=T.filter(t=>!t.documented&&t.status!=="retired");
+  const missing=T.filter(t=>t.path&&!t.exists);
+  const und=BOARD.undeclared_tools||[];
+
+  const chip=(txt,col)=>`<span class="chip" style="background:${col}">${txt}</span>`;
+  const acc=a=>a==="write"?chip("write","var(--stop)")
+    :a==="read-write-local"?chip("local write","var(--warn)")
+    :chip("read-only","var(--ok)");
+
+  const row=t=>`<tr>
+    <td><b>${esc(t.name)}</b>
+      <div class="why">${t.does?esc(t.does):'<span class="gap">No description. Nobody can hand this over.</span>'}</div>
+      ${t.note?`<div class="why">${esc(t.note)}</div>`:""}</td>
+    <td>${esc(t.where)}</td>
+    <td>${acc(t.access)}${t.status!=="active"?" "+chip(t.status,"var(--faint)"):""}
+        ${t.path&&!t.exists?" "+chip("path missing","var(--stop)"):""}</td>
+    <td>${t.used_by.length
+      ?t.used_by.map(p=>`<span class="lnk" onclick="pick('${p}')">${p}</span>`).join(", ")
+      :`<span class="why">nothing</span>`}</td>
+    <td>${t.used_by.length||t.status==="retired"?"":
+      `<button class="vb kill" onclick="retireTool('${t.id}')">Retire</button>`}</td>
+  </tr>`;
+
+  return `
+  <h1>Tools</h1>
+  <p class="lede">Shared capabilities. A tool is not owned by whatever needed it
+     first, so projects reference it by id and the description lives in one place.</p>
+
+  <div class="card"><div class="bars">
+    <div class="stat"><div class="k">Registered</div><div class="v">${T.length}</div>
+      <div class="n">across this store</div></div>
+    <div class="stat"><div class="k">Used by nothing</div>
+      <div class="v" style="color:${orphan.length?"var(--warn)":"var(--ok)"}">${orphan.length}</div>
+      <div class="n">either dead or undeclared</div></div>
+    <div class="stat"><div class="k">Undocumented</div>
+      <div class="v" style="color:${undocumented.length?"var(--warn)":"var(--ok)"}">${undocumented.length}</div>
+      <div class="n">no one-line description</div></div>
+    <div class="stat"><div class="k">Path missing</div>
+      <div class="v" style="color:${missing.length?"var(--stop)":"var(--ok)"}">${missing.length}</div>
+      <div class="n">registered but not on disk</div></div>
+  </div></div>
+
+  ${und.length?`<div class="card"><h2>Declared but not registered</h2>
+    <p class="why">A project depends on these and nothing describes them. That is
+       load-bearing and undocumented, which is worse than unused.</p>
+    <div>${und.map(i=>chip(i,"var(--stop)")).join(" ")}</div></div>`:""}
+
+  <div class="card"><h2>Registry, least depended on first</h2>
+    <table>
+      <tr><th>Tool</th><th>Where it runs</th><th>Access</th><th>Used by</th><th></th></tr>
+      ${T.map(row).join("")}
+    </table>
+    <p class="hint">Retiring is refused while a project still declares the tool.
+       Remove the dependency first, and say why it is no longer needed there.</p>
+  </div>`;
+}
+
+async function retireTool(id){
+  const why=prompt("Why retire "+id+"? The reason stays on the record.");
+  if(why===null) return;
+  const r=await fetch("/api/tool",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"retire",tool:id,reason:why,store:"work"})});
+  const d=await r.json();
+  if(!r.ok){alert(d.error||"refused");return;}
+  await load(); draw();
 }
 
 /* ---- triage: the view that removes things ----
@@ -471,7 +549,41 @@ function projectView(){
     :`<p class="empty">No relations recorded. Nothing is implicitly connected.</p>`}
   </div>
 
+  <div class="card">
+    <h2>Depends on<span class="toolbar">
+      <button class="sm" onclick="toggleUses()">Change</button></span></h2>
+
+    <div id="usesbox" style="display:none;margin-bottom:14px">
+      <div class="grid2">
+        ${(BOARD.tools||[]).map(t=>`<label class="fl">
+          <input type="checkbox" class="use-ck" value="${t.id}"${p.uses.includes(t.id)?" checked":""}>
+          ${t.id}</label>`).join("")}
+      </div>
+      <div class="vrow"><button class="sm pri" onclick="saveUses()">Save</button>
+        <button class="sm" onclick="toggleUses()">Cancel</button></div>
+    </div>
+
+    ${p.uses.length?`<table>
+      <tr><th>Tool</th><th>What it does</th><th>Where</th></tr>
+      ${p.uses.map(id=>{const t=(BOARD.tools||[]).find(x=>x.id===id);
+        return `<tr><td>${id}</td>
+          <td class="why">${t?esc(t.does)||"<span class='gap'>undescribed</span>"
+            :"<span class='gap'>not in the registry</span>"}</td>
+          <td class="why">${t?esc(t.where):""}</td></tr>`;}).join("")}
+    </table>
+    <p class="hint">Tools are referenced, not owned. They are used by this project
+       and are not limited to it.</p>`
+    :`<p class="empty">No declared tool dependencies.</p>`}
+  </div>
+
   <div class="card"><h2>Source</h2><div class="mono">${p.source_file||""}</div></div>`;
+}
+
+function toggleUses(){const b=document.getElementById("usesbox");
+  b.style.display=b.style.display==="none"?"block":"none";}
+async function saveUses(){
+  const ids=[...document.querySelectorAll(".use-ck")].filter(c=>c.checked).map(c=>c.value);
+  await api({action:"uses",fields:{uses:ids}});
 }
 
 /* ---- edit plumbing ---- */

@@ -27,11 +27,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from .model import Board, StoreError, capacity, score
+from .model import Board, StoreError, capacity, score, tool_usage
 from .verdict import VerdictError, capture, read_log, record_verdict
 from . import edit as edits
 from .edit import EditError
-from .writer import save
+from .writer import save, save_tools
 
 WEB = Path(__file__).resolve().parent / "web"
 
@@ -106,15 +106,29 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
             "relations": [{
                 "to": r.to, "type": r.type, "status": r.status, "note": r.note,
             } for r in p.relations],
+            "uses": p.uses,
             "source_file": str(p.source_file) if p.source_file else None,
         })
 
     ranked.sort(key=lambda r: -r["score"])
 
+    tools = board.tools(stores)
+    usage = tool_usage(tools, projects)
+
     return {
         "generated": date.today().isoformat(),
         "stores": list(stores),
         "projects": ranked,
+        "tools": [{
+            "id": t.id, "name": t.name or t.id, "does": t.does, "where": t.where,
+            "path": t.path, "status": t.status, "access": t.access, "note": t.note,
+            "exists": t.exists, "documented": t.documented,
+            "used_by": usage.get(t.id, []),
+        } for t in sorted(tools, key=lambda x: (len(usage.get(x.id, [])), x.id))],
+        # A project can name a tool that was never registered. That is not an
+        # error at read time, it is a finding: something load-bearing is
+        # undocumented.
+        "undeclared_tools": sorted(set(usage) - {t.id for t in tools}),
         "capacity": capacity(projects, weekly_hours),
         "vpn": vpn_state(),
     }
@@ -237,7 +251,35 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/edit":
             return self._edit(board, store, data)
 
+        if u.path == "/api/tool":
+            return self._tool(board, store, data)
+
         self._json({"error": "not found"}, 404)
+
+    def _tool(self, board, store, data):
+        """Registry edits. The registry is one file per store, not per project."""
+        try:
+            root = board.root_for(store)
+            tools = board.tools((store,))
+            projects = board.load((store,))
+        except StoreError as e:
+            return self._json({"error": str(e)}, 400)
+
+        action = data.get("action", "")
+        try:
+            if action == "upsert":
+                edits.upsert_tool(tools, data.get("fields") or {})
+            elif action == "retire":
+                edits.retire_tool(tools, data.get("tool", ""),
+                                  data.get("reason", ""),
+                                  tool_usage(tools, projects))
+            else:
+                return self._json({"error": f"unknown action {action!r}"}, 400)
+        except EditError as e:
+            return self._json({"error": str(e)}, 400)
+
+        save_tools(tools, root)
+        return self._json({"ok": True, "action": action})
 
     # ---- structural edits ------------------------------------------------
     # One endpoint with an action, rather than a route per verb. The set of
@@ -275,6 +317,9 @@ class Handler(BaseHTTPRequestHandler):
             elif action == "relation.verdict":
                 edits.set_relation(p, data.get("to", ""),
                                    data.get("verdict", ""), data.get("note", ""))
+            elif action == "uses":
+                known = {t.id for t in board.tools((store,))}
+                edits.set_uses(p, payload.get("uses") or [], known)
             else:
                 return self._json({"error": f"unknown action {action!r}"}, 400)
         except EditError as e:
@@ -386,6 +431,23 @@ def selftest() -> int:
             return 1
         except EditError:
             print("  a dependency cycle is refused")
+
+        # Tools are shared, so a project must not be able to claim one out of
+        # existence while another still depends on it.
+        tools = sandbox.tools(("work",))
+        if tools:
+            usage = tool_usage(tools, sandbox.load(("work",)))
+            orphans = [t.id for t in tools if not usage.get(t.id)]
+            print(f"  tool registry: {len(tools)} tool(s), "
+                  f"{len(orphans)} depended on by nothing")
+            held = next((tid for tid, users in usage.items() if users), None)
+            if held:
+                try:
+                    edits.retire_tool(tools, held, "selftest", usage)
+                    print("  FAIL: retired a tool a project still depends on")
+                    return 1
+                except EditError:
+                    print("  retiring a depended-on tool is refused")
 
     print("selftest OK")
     return 0

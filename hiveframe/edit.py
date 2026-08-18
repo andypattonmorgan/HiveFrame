@@ -206,3 +206,76 @@ def add_artifact(project, data: dict):
                    kind=str(data.get("kind", "doc")).strip() or "doc")
     project.artifacts.append(art)
     return art
+
+
+# ---- tools ---------------------------------------------------------------
+# Tools are edited in the registry, and attached to projects by id. Attaching a
+# copy instead of a reference is the mistake this whole section exists to avoid:
+# three copies of a description disagree within a month, and then nobody trusts
+# any of them.
+
+TOOL_STATUS = ("active", "experimental", "unused", "retired")
+TOOL_ACCESS = ("read-only", "read-write-local", "write")
+
+
+def set_uses(project, tool_ids: list[str], known: set[str]):
+    """Declare which tools a project depends on.
+
+    Unknown ids are refused rather than silently dropped. A dependency on a tool
+    that does not exist is either a typo or a tool nobody registered, and both
+    are worth stopping on.
+    """
+    ids = [t.strip() for t in tool_ids if t and t.strip()]
+    unknown = [t for t in ids if t not in known]
+    if unknown:
+        raise EditError(f"no registered tool(s): {', '.join(unknown)}")
+    project.uses = sorted(dict.fromkeys(ids))
+    return project
+
+
+def upsert_tool(tools: list, data: dict):
+    """Add a tool, or update the one with the same id."""
+    from .model import Tool
+    tid = str(data.get("id", "")).strip()
+    if not tid:
+        raise EditError("a tool needs an id")
+    status = str(data.get("status", "active")).strip() or "active"
+    access = str(data.get("access", "read-only")).strip() or "read-only"
+    if status not in TOOL_STATUS:
+        raise EditError(f"unknown tool status {status!r}")
+    if access not in TOOL_ACCESS:
+        raise EditError(f"unknown access mode {access!r}")
+
+    existing = next((t for t in tools if t.id == tid), None)
+    target = existing or Tool(id=tid)
+    target.name = str(data.get("name", target.name)).strip()
+    target.does = str(data.get("does", target.does)).strip()
+    target.where = str(data.get("where", target.where)).strip()
+    target.path = str(data.get("path", target.path)).strip()
+    target.note = str(data.get("note", target.note)).strip()
+    target.status = status
+    target.access = access
+    if existing is None:
+        tools.append(target)
+    return target
+
+
+def retire_tool(tools: list, tool_id: str, reason: str, usage: dict):
+    """Retire a tool. Refused while a project still declares it.
+
+    Retiring something another project depends on is how a board loses a
+    capability it did not know it was using.
+    """
+    if not (reason or "").strip():
+        raise EditError("retiring a tool needs a reason")
+    t = next((x for x in tools if x.id == tool_id), None)
+    if t is None:
+        raise EditError(f"no tool {tool_id!r} in the registry")
+    users = usage.get(tool_id, [])
+    if users:
+        raise EditError(
+            f"{tool_id} is still declared by: {', '.join(users)}. "
+            "Remove the dependency first, or say why it is no longer needed there.")
+    t.status = "retired"
+    t.note = (t.note + " | " if t.note else "") + f"retired: {reason.strip()}"
+    return t
