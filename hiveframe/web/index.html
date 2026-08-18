@@ -92,6 +92,13 @@
   .stat .n{color:var(--dim);font-size:12px;margin-top:4px}
 
   .why{color:var(--faint);font-size:12px}
+  .rsn{width:100%;min-width:190px;background:#0f1115;border:1px solid var(--line);
+       border-radius:6px;padding:6px 8px;color:var(--ink);font:inherit;font-size:12.5px}
+  .vrow{display:flex;gap:5px;margin-top:6px}
+  .vb{background:#20252f;color:var(--dim);border:1px solid var(--line);border-radius:6px;
+      padding:4px 9px;font-size:11.5px;cursor:pointer}
+  .vb:hover{border-color:#3a4150;color:var(--ink)}
+  .vb.kill:hover{border-color:var(--stop);color:var(--stop)}
   .flag{display:flex;gap:9px;padding:9px 0;border-bottom:1px solid #1e222b;font-size:13.5px}
   .flag:last-child{border-bottom:0}
   .flag .b{width:3px;border-radius:2px;flex:none}
@@ -140,6 +147,7 @@
     <div class="topbar">
       <button class="tab on" data-v="project">Project</button>
       <button class="tab" data-v="brief">Brief</button>
+      <button class="tab" data-v="triage">Triage</button>
       <button class="tab" data-v="capacity">Capacity</button>
       <span class="spacer"></span>
       <span class="why" id="stamp"></span>
@@ -209,8 +217,87 @@ function pick(id){SEL=id;drawRail();draw();}
 function draw(){
   const el=document.getElementById("view");
   if(VIEW==="brief") return el.innerHTML=briefView();
+  if(VIEW==="triage") return el.innerHTML=triageView();
   if(VIEW==="capacity") return el.innerHTML=capView();
   el.innerHTML=projectView();
+}
+
+/* ---- triage: the view that removes things ----
+   Ordered worst first, because the top of a board looks after itself. Every
+   row forces one of four verdicts and none of them is "leave it". A reason is
+   required, since a kill with no reason returns in six weeks as a new idea. */
+function triageView(){
+  const live=BOARD.projects.filter(p=>p.status==="active"||p.status==="blocked");
+  const rest=BOARD.projects.filter(p=>!(p.status==="active"||p.status==="blocked"));
+  const order=[...live].reverse();
+
+  const row=p=>`
+    <tr>
+      <td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span>
+        <div class="why">${p.why.join("; ")||"no signals"}</div>
+        ${p.charter.kill_when?`<div class="why">Kill when: ${p.charter.kill_when}</div>`
+          :`<div class="why gap">No kill condition stated. Nothing here can ever fail.</div>`}</td>
+      <td class="num">${p.score}</td>
+      <td class="num">${p.open_tasks}</td>
+      <td class="num">${p.open_effort_h}h</td>
+      <td>
+        <input class="rsn" id="rsn-${p.id}" placeholder="Why. One line, required.">
+        <div class="vrow">
+          <button class="vb kill" onclick="verdict('${p.id}','killed')">Kill</button>
+          <button class="vb" onclick="verdict('${p.id}','paused')">Park</button>
+          <button class="vb" onclick="verdict('${p.id}','done')">Done</button>
+          <button class="vb" onclick="verdict('${p.id}','active')">Keep</button>
+        </div>
+      </td>
+    </tr>`;
+
+  return `
+  <h1>Triage</h1>
+  <p class="lede">Worst first. Kill it, park it, close it, or keep it and say why.
+     Leaving it is not one of the four.</p>
+
+  <div class="card"><h2>Live, weakest first</h2>
+    <table>
+      <tr><th>Project</th><th>Score</th><th>Open</th><th>Effort</th><th>Verdict</th></tr>
+      ${order.map(row).join("")}
+    </table>
+    <p class="why" style="margin:10px 0 0">Every verdict rewrites one line in the
+       project's own file and appends to decisions.jsonl. Nothing else is written.</p>
+  </div>
+
+  ${rest.length?`<div class="card"><h2>Already decided</h2>
+    <table><tr><th>Project</th><th>Status</th><th>Open</th></tr>
+    ${rest.map(p=>`<tr><td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span></td>
+      <td>${p.status}</td><td class="num">${p.open_tasks}</td></tr>`).join("")}
+    </table></div>`:`<div class="card"><h2>Already decided</h2>
+    <p class="empty">Nothing has ever been removed from this board.</p></div>`}
+
+  <div class="card"><h2>Decision log</h2><div id="dlog"></div></div>`;
+}
+
+async function verdict(id,status){
+  const box=document.getElementById("rsn-"+id);
+  const reason=(box&&box.value||"").trim();
+  if(!reason){box.focus();box.placeholder="A reason is required.";return;}
+  const r=await fetch("/api/verdict",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({project:id,status,reason,store:"work"})});
+  const d=await r.json();
+  if(!r.ok){alert(d.error||"refused");return;}
+  await load(); draw(); loadLog();
+}
+
+async function loadLog(){
+  const el=document.getElementById("dlog");
+  if(!el) return;
+  const r=await fetch("/api/log?name=decisions.jsonl");
+  const rows=(await r.json()).rows||[];
+  el.innerHTML=rows.length?`<table>
+    <tr><th>When</th><th>Project</th><th>Change</th><th>Reason</th></tr>
+    ${rows.map(x=>`<tr><td class="num">${x.at.slice(0,16).replace("T"," ")}</td>
+      <td>${x.name}</td><td>${x.from} to ${x.to}</td>
+      <td class="why">${x.reason}</td></tr>`).join("")}</table>`
+    :`<p class="empty">No decisions recorded yet.</p>`;
 }
 
 function projectView(){
@@ -405,10 +492,17 @@ document.getElementById("fold").onclick=()=>{
   f.classList.toggle("collapsed");
   document.getElementById("fold").textContent=f.classList.contains("collapsed")?"+":"-";
 };
-document.getElementById("capture").addEventListener("keydown",e=>{
+document.getElementById("capture").addEventListener("keydown",async e=>{
   if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();
     const v=e.target.value.trim(); if(!v)return;
-    e.target.value=""; e.target.placeholder="Parked. Keep going.";
+    /* Persist it. A capture box that discards what you typed teaches you not
+       to use it, and then the thought goes back into working memory. */
+    const r=await fetch("/api/capture",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text:v,store:"work",
+        project:task?task.p.id:"",task:task?task.t.id:""})});
+    if(!r.ok){e.target.placeholder="Not saved. Try again.";return;}
+    e.target.value=""; e.target.placeholder="Parked in inbox.jsonl. Keep going.";
     setTimeout(()=>e.target.placeholder="Park the thought here",2500);
   }
 });
@@ -416,6 +510,7 @@ document.getElementById("capture").addEventListener("keydown",e=>{
 document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));
   b.classList.add("on"); VIEW=b.dataset.v; draw();
+  if(VIEW==="triage") loadLog();
 });
 
 paint(); load();

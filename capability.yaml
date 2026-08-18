@@ -1,7 +1,7 @@
 name: hiveframe
 owner: D112236
-stage: phase-1
-access_mode: read-only
+stage: phase-2
+access_mode: read-write-local
 description: >
   Private working surface for holding many project threads without context
   bleed. Each project carries its own charter, tasks, artifacts and declared
@@ -9,19 +9,23 @@ description: >
 
 systems:
   - name: local filesystem
-    mode: read
-    note: project TOML files in the configured work and personal roots
+    mode: read-write
+    note: >
+      reads project TOML files in the configured roots; writes the status line
+      of a project's own file, plus decisions.jsonl and inbox.jsonl beside it
   - name: macOS Finder
     mode: reveal-only
     note: opens Finder at an artifact path, never launches the file
 
 scopes:
   - read local project files
+  - rewrite one status line in a project file, on an explicit verdict
+  - append to decisions.jsonl and inbox.jsonl in a named store
   - reveal a path in Finder
 
 egress:
   - none
-  - binds 127.0.0.1 only, no external network calls in phase 1
+  - binds 127.0.0.1 only, no external network calls
 
 data_classification:
   work_store: KP internal
@@ -29,7 +33,13 @@ data_classification:
   repo_contents: no real data, example projects use invented content
 
 writes:
-  - none in phase 1
-  - phase 2 writes only to local project files, never to a system of record
+  - target: project .toml status line
+    scope: exactly one line in the [project] table, refused if not exactly one match
+    trigger: an explicit verdict from the triage view, with a mandatory reason
+  - target: decisions.jsonl
+    scope: append-only, one record per verdict
+  - target: inbox.jsonl
+    scope: append-only, one record per parked interruption
+  - never: any system of record. Every data connector in the suite stays GET-only.
 
 selftest: python3 -m hiveframe.server --selftest

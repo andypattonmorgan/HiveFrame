@@ -12,14 +12,20 @@ without disturbing the rest of the hive.
 **What it does.** Holds projects and experiments as plain files, each with its own
 charter, tasks, artifacts and declared relationships. Brings one project into
 focus so its context is on screen while you work on it. Ranks what to do next and
-says why. Runs a focus timer bound to a real task.
+says why. Runs a focus timer bound to a real task. Records triage verdicts so the
+board can lose entries.
 
 **What it must never do.** Write to any system of record. HiveFrame reads local
 files and calls existing read-only connectors. It has no write path into Jira,
 ServiceNow, Concerto or the warehouse, and it adds no new access.
 
-**Read-only in this phase.** Every endpoint is a GET. Editing tasks and confirming
-relations arrive in phase 2, and they write to local project files only.
+**What it writes.** Three things, all local files inside a store the caller named:
+the `status` line in a project's own `.toml`, an append-only `decisions.jsonl`,
+and an append-only `inbox.jsonl`. Everything else is a GET.
+
+A verdict rewrites exactly one line and refuses if it cannot find exactly one, so
+your comments, ordering and phrasing survive. A verdict without a reason is
+rejected: a kill with no reason written down returns in six weeks as a new idea.
 
 **Whose identity.** Runs as the operator, locally, bound to 127.0.0.1. No auth
 because there is no network exposure.
@@ -47,8 +53,9 @@ Three consequences it addresses directly:
 | Path | Purpose |
 |---|---|
 | `hiveframe/model.py` | Data model, loader, store boundary, capacity, scoring |
-| `hiveframe/server.py` | Local read-only HTTP service and self test |
-| `hiveframe/web/index.html` | The interface: project rail, project view, brief, capacity, focus timer |
+| `hiveframe/verdict.py` | The only writes: status line, decision log, interruption inbox |
+| `hiveframe/server.py` | Local HTTP service and self test |
+| `hiveframe/web/index.html` | The interface: project rail, project view, brief, triage, capacity, focus timer |
 | `example/projects/*.toml` | Example projects with invented data, so the shape is obvious |
 
 **The file format is the contract.** One TOML per project: diffable, greppable,
@@ -136,6 +143,20 @@ actual hours against tasks, so the correction is measured rather than guessed.
 Undated effort is reported separately, because work with no date is invisible to
 any projection and pretending otherwise makes the number worse than useless.
 
+## Triage
+
+The view that removes things. Live projects are listed worst first, because the
+top of a board looks after itself and the bottom is where the cost hides.
+
+Every row offers four verdicts and none of them is "leave it": kill, park, done,
+keep. Each needs a one-line reason. The verdict rewrites the project's status and
+appends to `decisions.jsonl` next to the project files, so the board keeps its
+own history of what it stopped doing and why.
+
+A project with no `kill_when` in its charter is called out here. Without one,
+nothing on the board can ever fail, and a board that cannot lose an entry only
+grows.
+
 ## Security
 
 No secrets in this repo, in config, or in the page. Credentials for connectors
@@ -147,7 +168,8 @@ data. Sanitised data is not used, because sanitised data leaks.
 
 ## Status
 
-Phase 1. Project model, project view, brief, capacity, focus timer.
+Phase 2. Project model, project view, brief, triage with verdicts, capacity,
+focus timer, interruption capture.
 
-Not yet built: writing task edits and relation verdicts, connector-fed brief,
+Not yet built: task edits and relation verdicts from the UI, connector-fed brief,
 the relation graph, project-bound chat, session logging and effort calibration.

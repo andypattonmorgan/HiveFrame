@@ -28,6 +28,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 from .model import Board, StoreError, capacity, score
+from .verdict import VerdictError, capture, read_log, record_verdict
 
 WEB = Path(__file__).resolve().parent / "web"
 
@@ -168,8 +169,67 @@ class Handler(BaseHTTPRequestHandler):
             subprocess.run(["/usr/bin/open", "-R", str(p)], check=False)
             return self._json({"ok": True})
 
+        if u.path == "/api/log":
+            name = q.get("name", ["decisions.jsonl"])[0]
+            if name not in ("decisions.jsonl", "inbox.jsonl"):
+                return self._json({"error": "unknown log"}, 400)
+            try:
+                root = Board.from_env().root_for(q.get("store", ["work"])[0])
+            except StoreError as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"rows": read_log(root, name)})
+
         if u.path.startswith("/static/"):
             return self._file(WEB / u.path[len("/static/"):])
+
+        self._json({"error": "not found"}, 404)
+
+    # ---- writes ----------------------------------------------------------
+    # The only two writes in the tool, both to files inside a store the caller
+    # named. No production system is written to from here or anywhere else.
+
+    def _body(self) -> dict:
+        n = int(self.headers.get("Content-Length") or 0)
+        if not n:
+            return {}
+        return json.loads(self.rfile.read(n) or b"{}")
+
+    def do_POST(self):
+        u = urlparse(self.path)
+        try:
+            data = self._body()
+        except json.JSONDecodeError:
+            return self._json({"error": "body was not JSON"}, 400)
+
+        board = Board.from_env()
+        store = data.get("store", "work")
+        try:
+            root = board.root_for(store)
+        except StoreError as e:
+            return self._json({"error": str(e)}, 400)
+
+        if u.path == "/api/verdict":
+            try:
+                projects = board.load((store,))
+            except StoreError as e:
+                return self._json({"error": str(e)}, 400)
+            hit = next((p for p in projects if p.id == data.get("project")), None)
+            if hit is None:
+                return self._json({"error": "no such project in that store"}, 404)
+            try:
+                rec = record_verdict(hit, data.get("status", ""),
+                                     data.get("reason", ""), root)
+            except VerdictError as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"ok": True, "recorded": rec})
+
+        if u.path == "/api/capture":
+            try:
+                rec = capture(data.get("text", ""), root,
+                              data.get("project", ""), data.get("task", ""))
+            except VerdictError as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"ok": True, "recorded": rec})
 
         self._json({"error": "not found"}, 404)
 
@@ -219,6 +279,36 @@ def selftest() -> int:
           f"{cap['available_h']}h available over {cap['window_days']}d")
     print(f"  at risk: {len(cap['at_risk'])} task(s)")
     print(f"  vpn: {vpn_state()['label']}")
+
+    # Writes are exercised on a copy in a temp directory. A selftest that edits
+    # the real store to prove it can edit the real store is not a test.
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_root = Path(tmp)
+        src = Path(board.roots["work"])
+        for f in src.glob("*.toml"):
+            shutil.copy2(f, tmp_root / f.name)
+        sandbox = Board({"work": tmp_root})
+        target = sandbox.load(("work",))[0]
+
+        try:
+            record_verdict(target, "paused", "", tmp_root)
+            print("  FAIL: a verdict with no reason was accepted")
+            return 1
+        except VerdictError:
+            print("  a verdict with no reason is refused")
+
+        record_verdict(target, "paused", "selftest, not a real decision", tmp_root)
+        again = next(p for p in sandbox.load(("work",)) if p.id == target.id)
+        if again.status != "paused":
+            print("  FAIL: status was not written back")
+            return 1
+        if len(read_log(tmp_root, "decisions.jsonl")) != 1:
+            print("  FAIL: decision was not logged")
+            return 1
+        print("  verdict writes the status line and logs the reason")
+
     print("selftest OK")
     return 0
 

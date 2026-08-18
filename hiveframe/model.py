@@ -245,6 +245,15 @@ class Board:
             roots["work"] = Path(__file__).resolve().parents[1] / "example" / "projects"
         return cls(roots)
 
+    def root_for(self, store: str) -> Path:
+        """The directory backing a store. Same gate as load(), for writers."""
+        if store not in STORES:
+            raise StoreError(f"unknown store: {store}")
+        root = self.roots.get(store)
+        if root is None:
+            raise StoreError(f"store {store} is not configured")
+        return root
+
     def load(self, stores: tuple[str, ...] = ("work",)) -> list[Project]:
         for s in stores:
             if s not in STORES:
