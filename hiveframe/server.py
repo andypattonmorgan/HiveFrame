@@ -29,6 +29,9 @@ from urllib.parse import urlparse, parse_qs
 
 from .model import Board, StoreError, capacity, score
 from .verdict import VerdictError, capture, read_log, record_verdict
+from . import edit as edits
+from .edit import EditError
+from .writer import save
 
 WEB = Path(__file__).resolve().parent / "web"
 
@@ -231,7 +234,54 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 400)
             return self._json({"ok": True, "recorded": rec})
 
+        if u.path == "/api/edit":
+            return self._edit(board, store, data)
+
         self._json({"error": "not found"}, 404)
+
+    # ---- structural edits ------------------------------------------------
+    # One endpoint with an action, rather than a route per verb. The set of
+    # edits will grow, and a router that grows a branch per field is how a
+    # small tool acquires a large surface nobody can audit.
+
+    def _edit(self, board, store, data):
+        try:
+            projects = board.load((store,))
+        except StoreError as e:
+            return self._json({"error": str(e)}, 400)
+
+        p = next((x for x in projects if x.id == data.get("project")), None)
+        if p is None:
+            return self._json({"error": "no such project in that store"}, 404)
+
+        action = data.get("action", "")
+        payload = data.get("fields") or {}
+        try:
+            if action == "project":
+                edits.edit_project(p, payload)
+            elif action == "charter":
+                edits.edit_charter(p, payload)
+            elif action == "task.add":
+                edits.add_task(p, payload)
+            elif action == "task.edit":
+                edits.edit_task(p, data.get("task", ""), payload)
+            elif action == "task.drop":
+                edits.drop_task(p, data.get("task", ""), data.get("reason", ""))
+            elif action == "artifact.add":
+                edits.add_artifact(p, payload)
+            elif action == "relation.add":
+                edits.add_relation(p, data.get("to", ""), data.get("type", ""),
+                                   data.get("note", ""))
+            elif action == "relation.verdict":
+                edits.set_relation(p, data.get("to", ""),
+                                   data.get("verdict", ""), data.get("note", ""))
+            else:
+                return self._json({"error": f"unknown action {action!r}"}, 400)
+        except EditError as e:
+            return self._json({"error": str(e)}, 400)
+
+        save(p)
+        return self._json({"ok": True, "project": p.id, "action": action})
 
 
 def selftest() -> int:
@@ -308,6 +358,34 @@ def selftest() -> int:
             print("  FAIL: decision was not logged")
             return 1
         print("  verdict writes the status line and logs the reason")
+
+        # A round trip must not lose data, or every edit quietly costs you
+        # something you did not agree to give up.
+        from .model import load_project
+        before = sandbox.load(("work",))[0]
+        save(before)
+        after = load_project(Path(before.source_file))
+        same = (len(before.tasks) == len(after.tasks)
+                and len(before.artifacts) == len(after.artifacts)
+                and len(before.relations) == len(after.relations)
+                and before.charter.problem == after.charter.problem
+                and [t.due for t in before.tasks] == [t.due for t in after.tasks]
+                and [t.blocked_by for t in before.tasks] == [t.blocked_by for t in after.tasks])
+        if not same:
+            print("  FAIL: writing and reloading a project changed it")
+            return 1
+        print("  writer round trip preserves tasks, artifacts, relations, charter")
+
+        try:
+            edits.edit_task(after, after.tasks[0].id,
+                            {"blocked_by": [after.tasks[0].id]})
+            edits.add_task(after, {"title": "loop probe"})
+            edits.edit_task(after, "loop-probe", {"blocked_by": [after.tasks[0].id]})
+            edits.edit_task(after, after.tasks[0].id, {"blocked_by": ["loop-probe"]})
+            print("  FAIL: a dependency cycle was accepted")
+            return 1
+        except EditError:
+            print("  a dependency cycle is refused")
 
     print("selftest OK")
     return 0

@@ -19,13 +19,20 @@ board can lose entries.
 files and calls existing read-only connectors. It has no write path into Jira,
 ServiceNow, Concerto or the warehouse, and it adds no new access.
 
-**What it writes.** Three things, all local files inside a store the caller named:
-the `status` line in a project's own `.toml`, an append-only `decisions.jsonl`,
-and an append-only `inbox.jsonl`. Everything else is a GET.
+**What it writes.** Local files only, inside a store the caller named: project
+`.toml` files, an append-only `decisions.jsonl`, and an append-only
+`inbox.jsonl`. Everything else is a GET.
 
-A verdict rewrites exactly one line and refuses if it cannot find exactly one, so
-your comments, ordering and phrasing survive. A verdict without a reason is
-rejected: a kill with no reason written down returns in six weeks as a new idea.
+Two write paths, on purpose. A triage verdict rewrites exactly one `status` line
+and refuses if it cannot find exactly one, so nothing else in the file can move.
+A structural edit (charter, task, artifact, relation) regenerates the file from
+the model, because a regex that edits structure is a regex that will eventually
+corrupt a file. The cost is that hand-written TOML comments are lost on a
+structural edit, so keep notes in a task `note` or a charter field where they are
+data rather than decoration. Every regeneration leaves a `.bak`.
+
+A verdict without a reason is rejected, and so is dropping a task without one. A
+kill with no reason written down returns in six weeks as a new idea.
 
 **Whose identity.** Runs as the operator, locally, bound to 127.0.0.1. No auth
 because there is no network exposure.
@@ -53,7 +60,9 @@ Three consequences it addresses directly:
 | Path | Purpose |
 |---|---|
 | `hiveframe/model.py` | Data model, loader, store boundary, capacity, scoring |
-| `hiveframe/verdict.py` | The only writes: status line, decision log, interruption inbox |
+| `hiveframe/edit.py` | Structural edits and the rules they must satisfy |
+| `hiveframe/writer.py` | Renders a project back to TOML, keeps a `.bak` |
+| `hiveframe/verdict.py` | Triage verdicts, decision log, interruption inbox |
 | `hiveframe/server.py` | Local HTTP service and self test |
 | `hiveframe/web/index.html` | The interface: project rail, project view, brief, triage, capacity, focus timer |
 | `example/projects/*.toml` | Example projects with invented data, so the shape is obvious |
@@ -157,6 +166,29 @@ A project with no `kill_when` in its charter is called out here. Without one,
 nothing on the board can ever fail, and a board that cannot lose an entry only
 grows.
 
+## Editing
+
+The charter, tasks, artifacts and relations are editable from the project view.
+The charter is editable in place rather than behind a form, because it is the
+thing that stops drift and making it hard to correct guarantees it goes stale
+and stops being believed.
+
+Four rules are enforced rather than suggested:
+
+- A task id is generated once from its title and never rewritten. `blocked_by`
+  refers to ids, so a renamed id would silently break a dependency chain.
+- A dependency that closes a loop is refused. Every task in a cycle is
+  permanently unstartable, and the board would show a stalled project with no
+  explanation.
+- Tasks are dropped with a reason, never deleted. A deleted task takes its
+  estimate with it and the capacity number quietly improves for no reason
+  anyone can point at.
+- A rejected relation stays on the record. Deleting it means the same suggestion
+  arrives next month looking new.
+
+A relation added by hand arrives confirmed. `suggested` is reserved for
+relations a machine proposed, which is a claim that still needs a verdict.
+
 ## Security
 
 No secrets in this repo, in config, or in the page. Credentials for connectors
@@ -168,8 +200,9 @@ data. Sanitised data is not used, because sanitised data leaks.
 
 ## Status
 
-Phase 2. Project model, project view, brief, triage with verdicts, capacity,
-focus timer, interruption capture.
+Phase 3. Project model, project view with in-place editing, brief, triage with
+verdicts, capacity, focus timer, interruption capture.
 
-Not yet built: task edits and relation verdicts from the UI, connector-fed brief,
-the relation graph, project-bound chat, session logging and effort calibration.
+Not yet built: connector-fed brief, the relation graph, project-bound chat,
+session logging and effort calibration, and sub-project rows so individual
+tools and hypotheses can be triaged rather than only whole projects.
