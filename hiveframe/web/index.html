@@ -189,6 +189,10 @@ function drawRail(){
         ${p.horizon?`<span class="hz" style="background:${HZ[p.horizon]||"#555"}">${p.horizon}</span>`:""}
         ${p.kind} · ${p.open_tasks} open${p.next_due?` · due ${p.next_due}`:""}
       </div>
+      <div class="pmeta">${p.stalled
+        ?`<span class="chip" style="background:var(--stop)">no move today</span>`
+        :(p.next_move?`next: ${p.next_move.title}${p.next_move.effort_h?` (${p.next_move.effort_h}h)`:""}`:"")}
+      </div>
       <div class="pscore">${p.score}</div>
     </div>`).join("");
 

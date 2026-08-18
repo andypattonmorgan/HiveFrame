@@ -112,6 +112,18 @@ A task lists prerequisites in `blocked_by`. A task waiting on an open sibling is
 never offered as a focus candidate, since a candidate you cannot start costs a
 decision and returns nothing.
 
+Ranking reads the tasks that can be started today, not every open task. Urgent
+and important flags are counted on those, and additional flagged tasks add less
+than the first: five urgent tasks is worse than one, but not five times more
+worth starting. The deadline that counts is the deadline on the next startable
+task, because a deadline on a task waiting for a sibling is a deadline on the
+sibling.
+
+Size breaks ties, it does not set priority. Between two things due the same day,
+a move of half an hour or less gains 6 and a move of four hours or more loses 4,
+because the short one gets finished and an unfinished start on the long one
+leaves the board where it was.
+
 ## Capacity
 
 A fixed weekly hour budget against the sum of dated, estimated open tasks over a

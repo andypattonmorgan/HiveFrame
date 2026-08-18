@@ -160,6 +160,17 @@ class Project:
         dates = [t.due for t in self.open_tasks if t.due]
         return min(dates) if dates else None
 
+    def next_actionable(self) -> "Task | None":
+        """The soonest task I could actually start, or None.
+
+        Ranking uses this rather than next_due, because a deadline on a task
+        that is waiting on a sibling is a deadline on the sibling.
+        """
+        dated = [t for t in self.actionable_tasks if t.due]
+        if dated:
+            return min(dated, key=lambda t: t.due)
+        return self.actionable_tasks[0] if self.actionable_tasks else None
+
 
 def _as_date(value) -> date | None:
     if value is None or value == "":
@@ -323,11 +334,12 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
     if project.status == "blocked":
         why.append("blocked externally")
 
-    due = project.next_due()
+    nxt = project.next_actionable()
+    due = nxt.due if nxt else None
     if due is not None:
         days = (due - today).days
         if days < 0:
-            pts += 40
+            pts += 40 + min(abs(days), 10)
             why.append(f"overdue by {abs(days)}d")
         elif days <= 7:
             pts += 30 - days
@@ -336,14 +348,31 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
             pts += 8
             why.append(f"due in {days}d")
 
-    urgent = [t for t in project.open_tasks if t.urgent]
-    important = [t for t in project.open_tasks if t.important]
+    # Size is a tiebreaker, not a priority. Between two things due the same day,
+    # the one that fits in a sitting is the one that gets finished, and an
+    # unfinished start on the other leaves the board exactly where it was.
+    if nxt is not None and due is not None and (due - today).days <= 2:
+        if nxt.effort_h and nxt.effort_h <= 0.5:
+            pts += 6
+            why.append(f"next move is {nxt.effort_h}h")
+        elif nxt.effort_h >= 4:
+            pts -= 4
+            why.append(f"next move is {nxt.effort_h}h, will not fit today")
+
+    # Flags are counted on the tasks that can actually be started today. An
+    # urgent task waiting on an open sibling is not urgent to me, it is urgent
+    # to the thing in front of it, and counting it twice is how six projects end
+    # up tied. Additional flagged tasks add less than the first: a project with
+    # five urgent tasks is worse than one with a single urgent task, but it is
+    # not five times more worth starting.
+    urgent = [t for t in project.actionable_tasks if t.urgent]
+    important = [t for t in project.actionable_tasks if t.important]
     if urgent:
-        pts += 20
-        why.append(f"{len(urgent)} marked urgent")
+        pts += 20 + 6 * (len(urgent) - 1)
+        why.append(f"{len(urgent)} urgent and startable")
     if important:
-        pts += 10
-        why.append(f"{len(important)} marked important")
+        pts += 10 + 3 * (len(important) - 1)
+        why.append(f"{len(important)} important and startable")
 
     # An item other work waits on outranks an item nothing waits on.
     blocks = [r for r in project.confirmed_relations if r.type == "blocks"]
@@ -361,15 +390,17 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
 
     # A block is a reason to act, not a reason to wait. If there is a move that
     # attacks it, promote it: unblocking work releases everything downstream and
-    # gets cheaper the earlier it is done. Only demote when there is genuinely
-    # nothing available, and even then only to break a tie, never to the floor.
-    if project.status == "blocked":
-        if project.actionable_tasks:
-            pts += 25
-            why.append(f"{len(project.actionable_tasks)} move(s) available to unblock it")
-        else:
-            pts -= 5
-            why.append("no move available today")
+    # gets cheaper the earlier it is done.
+    if project.status == "blocked" and project.actionable_tasks:
+        pts += 25
+        why.append(f"{len(project.actionable_tasks)} move(s) available to unblock it")
+
+    # Stalled is the honest state for any live project with open work and no
+    # move available, blocked or not. Demote only enough to break a tie: it is
+    # still on the board, and it still needs someone to find it a move.
+    if project.stalled:
+        pts -= 5
+        why.append("no move available today")
 
     if not project.open_tasks:
         pts -= 10

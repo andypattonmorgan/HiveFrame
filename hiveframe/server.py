@@ -59,6 +59,7 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
     ranked = []
     for p in projects:
         pts, why = score(p)
+        nxt = p.next_actionable()
         ranked.append({
             "id": p.id,
             "name": p.name,
@@ -68,6 +69,9 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
             "store": p.store,
             "score": round(pts, 1),
             "why": why,
+            "next_move": ({"id": nxt.id, "title": nxt.title,
+                           "due": nxt.due.isoformat() if nxt.due else None,
+                           "effort_h": nxt.effort_h} if nxt else None),
             "open_tasks": len(p.open_tasks),
             "actionable_tasks": len(p.actionable_tasks),
             "stalled": p.stalled,
@@ -201,6 +205,14 @@ def selftest() -> int:
         print("  FAIL: blocking a project with an available move lowered its rank")
         return 1
     print("  blocked with a move available ranks above the same project unblocked")
+
+    # Ranking has to separate. A board where everything scores the same is a
+    # list, and a list is what the tool exists to replace.
+    scores = [score(p)[0] for p in projects if p.status in ("active", "blocked")]
+    if len(scores) != len(set(scores)):
+        print(f"  WARN: {len(scores) - len(set(scores))} project(s) tied on score")
+    else:
+        print(f"  ranking separates: {len(scores)} live project(s), no ties")
 
     cap = capacity(projects, 10.0)
     print(f"  capacity: {cap['committed_h']}h committed against "
