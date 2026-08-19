@@ -79,6 +79,16 @@ DENY_TOOLS = (
 DEFAULT_MODEL = os.environ.get("HIVEFRAME_CHAT_MODEL", "claude-sonnet-4.5")
 TIMEOUT_S = int(os.environ.get("HIVEFRAME_CHAT_TIMEOUT", "180"))
 
+# The persona lives in one place and is composed there, so this points at it
+# rather than restating it. AGENTS.md in the store root carries the compact
+# brief; this directory is granted read access so a question that turns on
+# posture, paths or capabilities can be answered from the source instead of
+# from a summary of it.
+BRAIN_DIR = Path(os.environ.get(
+    "HIVEFRAME_BRAIN",
+    "/Users/D112236/Library/CloudStorage/OneDrive-KaiserPermanente/KaiserKM",
+))
+
 _SESSION_RE = re.compile(r"--resume=([0-9a-fA-F-]{8,})")
 _CREDITS_RE = re.compile(r"AI Credits\s+([0-9.]+)")
 
@@ -168,6 +178,8 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
 
     for d in dirs:
         argv += ["--add-dir", str(d)]
+    if BRAIN_DIR.exists():
+        argv += ["--add-dir", str(BRAIN_DIR)]
 
     session = read_session(root) if resume else ""
     if session:
