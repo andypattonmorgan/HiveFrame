@@ -244,6 +244,82 @@
             color: var(--faint)
         }
 
+        /* ---- files, in the rail under the projects ----
+           Which project and which file are the same question asked twice, so
+           they belong on the same axis. Keeping files out of the main column
+           means opening one does not push the project you were reading off
+           the screen.
+
+           Projects and files split the rail's spare height. Projects get the
+           smaller share because that list is short and stable; the file tree
+           is the one that grows. */
+        .railsplit {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-top: 1px solid var(--line);
+            margin-top: 4px
+        }
+
+        .railsplit .sm {
+            margin-left: auto;
+            text-transform: none;
+            letter-spacing: 0
+        }
+
+        .plist {
+            flex: 0 1 auto;
+            max-height: 46%
+        }
+
+        .ftree {
+            overflow: auto;
+            flex: 1 1 auto;
+            padding: 2px 10px 12px;
+            min-height: 90px
+        }
+
+        /* A path that wraps to three lines in a 290px rail is a path you stop
+           reading. Truncate and put the full name in the tooltip. */
+        .ftree .tree-item,
+        .ftree .tree-dir>summary {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis
+        }
+
+        .ftree .tree-children {
+            margin-left: 10px;
+            padding-left: 6px;
+            border-left: 1px solid var(--line)
+        }
+
+        .ftree .tree-item {
+            padding: 3px 0;
+            font-size: 12.5px
+        }
+
+        .ftree .tree-item.on {
+            background: #1d222c;
+            border-radius: 4px;
+            padding-left: 4px;
+            margin-left: -4px
+        }
+
+        .ftree .tree-dir>summary {
+            padding: 3px 0;
+            font-size: 12.5px;
+            color: var(--dim)
+        }
+
+        .ftree .rlabel {
+            color: var(--faint);
+            font-size: 10.5px;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            margin: 8px 0 2px
+        }
+
         .dot {
             display: inline-block;
             width: 7px;
@@ -1097,6 +1173,9 @@
             <div class="brand"><i class="hex"></i><b>HiveFrame</b><span id="cnt"></span></div>
             <div class="railhead">Projects</div>
             <div class="plist" id="plist"></div>
+            <div class="railhead railsplit">Files<button class="sm" id="ftreerefresh"
+                    title="Re-read this project's folders">Refresh</button></div>
+            <div class="ftree" id="ftree"></div>
             <div class="railfoot" id="railfoot"></div>
         </aside>
 
@@ -1266,7 +1345,9 @@
                things written are files on this laptop. */
             document.getElementById("stamp").textContent =
                 "Loaded " + BOARD.generated + " · writes local files only, no live system";
+            drawFiles();
         }
+
 
         /* One place that changes tab, so the button highlight can never disagree
            with what is on screen. */
@@ -1289,6 +1370,7 @@
             if (FILE && FILE_DIRTY && !confirm("Unsaved changes to " + (FILE.rel || FILE.name) + " will be lost. Switch anyway?")) return;
             SEL = id; FILE = null; FILE_DIRTY = false;
             drawRail(); syncChatProject();
+            showPrev(false); drawPrev();
             setView("project");
         }
 
@@ -1841,6 +1923,7 @@
                         : (data.error || "tree unavailable")
                 };
             if (VIEW === "project" && !FILE_DIRTY) draw();
+            drawFiles();
             return TREE[id];
         }
 
@@ -1850,13 +1933,15 @@
             if (n.exists === false) return `<div class="tree-item"><span class="missing">${name}</span> <span class="gap">missing</span></div>`;
             /* Clicking opens the file here rather than in Finder. Leaving to
                another application to read one paragraph is the context switch
-               this view exists to avoid. Finder is still one click away for
-               anything HiveFrame will not open. */
-            return `<div class="tree-item">
+               this view exists to avoid. Finder moved to the preview header,
+               because one Finder link per row is a lot of furniture for
+               something used once a week. */
+            const on = FILE && FILE.path === n.path ? " on" : "";
+            return `<div class="tree-item${on}" title="${esc(n.path)}">
                 <span class="lnk" onclick='openFile(${JSON.stringify(n.path)})'>${name}</span> ${size}
-                <span class="lnk why" onclick='reveal(${JSON.stringify(n.path)})'>Finder</span>
             </div>`;
         }
+
 
         function fsize(b) {
             if (b < 1024) return b + " B";
@@ -1870,31 +1955,35 @@
             const flags = [n.exists === false ? `<span class="gap">missing</span>` : "",
             n.truncated ? `<span class="gap">${n.hidden ? n.hidden + " more hidden" : "truncated"}</span>` : ""]
                 .filter(Boolean).join(" ");
+            /* A bare node drops its own summary row: the rail already names the
+               root above it, and a folder you cannot collapse does not need a
+               disclosure triangle. */
+            if (n.bare) return `<div>${children}</div>`;
             return `<details class="tree-dir"${n.open ? " open" : ""}>
                 <summary><span class="tree-name">${esc(n.name || n.path)}</span>${flags ? ` <span class="why">${flags}</span>` : ""}</summary>
                 <div class="tree-children">${children}</div>
             </details>`;
         }
 
-        function treeSection(id) {
+        /* The tree lives in the rail, so it renders into its own element rather
+           than into the main view. It survives a tab change, which is the point:
+           you can read a file while looking at Triage. */
+        function drawFiles() {
+            const el = document.getElementById("ftree");
+            if (!el) return;
+            const id = SEL;
+            if (!id) return el.innerHTML = `<p class="empty">No project selected.</p>`;
             const t = TREE[id];
-            if (!t) {
-                loadTree(id);
-                return `<div class="card"><h2>Files</h2><p class="empty">Loading…</p></div>`;
-            }
-            if (t.error) return `<div class="card"><h2>Files</h2><p class="empty">${esc(t.error)}</p></div>`;
-            return `
-  <div class="card">
-    <h2>Files<span class="toolbar">
-      <button class="sm" onclick='loadTree(${JSON.stringify(id)}, true)'>Refresh</button></span></h2>
-    <p class="hint">This project's folders only. Click a file to open it in the preview panel.${t.note ? ` <span class="gap">${esc(t.note)}</span>` : ""}</p>
-    ${(t.roots || []).map(r => `
-      <h2 style="margin-top:14px">${esc(r.label)}</h2>
-      ${treeNode(Object.assign({ open: true }, r.tree))}
-    `).join("") || `<p class="empty">No folder declared for this project.</p>`}
-  </div>
-`;
+            if (!t) { loadTree(id); return el.innerHTML = `<p class="empty">Loading…</p>`; }
+            if (t.error) return el.innerHTML = `<p class="empty">${esc(t.error)}</p>`;
+            const roots = t.roots || [];
+            if (!roots.length) return el.innerHTML = `<p class="empty">No folder declared for this project.</p>`;
+            el.innerHTML = roots.map(r => `
+                <div class="rlabel">${esc(r.label)}</div>
+                ${treeNode(Object.assign({ open: true, bare: true }, r.tree))}
+            `).join("") + (t.note ? `<p class="empty">${esc(t.note)}</p>` : "");
         }
+
 
         /* ---- preview panel: open, read, edit, save ----
            Read and write go through the server, which allows only paths inside
@@ -1942,6 +2031,16 @@
 
         function toggleSource() { FILE_SRC = !FILE_SRC; drawPrev(); }
 
+        /* Highlight the open file without re-rendering the tree, which would
+           collapse every folder you had opened to get there. */
+        function markOpenFile() {
+            const want = FILE && FILE.path ? FILE.path : null;
+            document.querySelectorAll("#ftree .tree-item").forEach(el => {
+                el.classList.toggle("on", !!want && el.getAttribute("title") === want);
+            });
+        }
+
+
         async function saveFile() {
             const ta = document.getElementById("fedit");
             if (!ta || !FILE) return;
@@ -1963,6 +2062,7 @@
 
         function drawPrev() {
             const el = document.getElementById("prev");
+            markOpenFile();
             if (!FILE) { el.innerHTML = ""; return; }
 
             const raw = "/api/raw?path=" + encodeURIComponent(FILE.path);
@@ -2193,10 +2293,9 @@
        and are not limited to it.</p>`
                     : `<p class="empty">No declared tool dependencies.</p>`}
   </div>
-
-  ${treeSection(p.id)}
 `;
         }
+
 
         function toggleUses() {
             const b = document.getElementById("usesbox");
@@ -2411,6 +2510,8 @@
         });
 
         document.querySelectorAll(".tab[data-v]").forEach(b => b.onclick = () => setView(b.dataset.v));
+
+        document.getElementById("ftreerefresh").onclick = () => { if (SEL) loadTree(SEL, true); };
 
         /* Chat controls are bound once, because the rail is markup rather than a
            re-rendered string. That is most of the reason it is a rail. */
