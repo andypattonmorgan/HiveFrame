@@ -206,15 +206,17 @@ class Handler(BaseHTTPRequestHandler):
             except StoreError as e:
                 return self._json({"error": str(e)}, 400)
             state = chatmod.available()
+            project = q.get("project", [""])[0]
             return self._json({
                 "cli": state,
-                "session": chatmod.read_session(root, q.get("project", [""])[0]),
+                "session": chatmod.read_session(root, project),
                 "model": chatmod.DEFAULT_MODEL,
                 "models": [{"id": m, "tier": t, "credits": c}
                            for m, t, c in chatmod.MODELS],
                 "allow": list(chatmod.ALLOW_TOOLS),
                 "deny": list(chatmod.DENY_TOOLS),
                 "history": chatmod.history(root),
+                "transcript": chatmod.read_transcript(root, project),
             })
 
         if u.path.startswith("/static/"):

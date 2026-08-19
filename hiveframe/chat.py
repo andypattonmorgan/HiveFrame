@@ -52,6 +52,18 @@ from pathlib import Path
 
 CHAT_LOG = "chat.jsonl"
 SESSION_FILE = ".chat_session"
+TRANSCRIPT_FILE = "transcript"
+
+# The CLI marks a tool invocation with a glyph and indents its detail beneath.
+# Splitting those out of the prose is what turns a wall of text into the step
+# list VS Code shows: you can see it read a file before you read its conclusion.
+# There is more than one glyph: a bullet for a completed step, a cross for a
+# refused one, and a rotating spinner character for one still running. Matching
+# only the bullet leaves the refusals in the prose, which reads as though the
+# assistant said them.
+_STEP_RE = re.compile(r"^\s*([●✓✗⚠◆•])\s*(.+?)\s*$")
+_SPINNER_RE = re.compile(r"^\s*([/\\|_-])\s+(\S.*?)\s*$")
+_STEP_DETAIL_RE = re.compile(r"^\s*[│└├]\s?(.*)$")
 
 # Read verbs, always allowed without prompting.
 ALLOW_TOOLS = (
@@ -148,12 +160,88 @@ def read_session(root: Path, project: str = "") -> str:
     return p.read_text(encoding="utf-8").strip()
 
 
+def _transcript_path(root: Path, project: str = "") -> Path:
+    safe = re.sub(r"[^a-z0-9_-]", "", (project or "board").lower())[:60] or "board"
+    return root / f"{TRANSCRIPT_FILE}.{safe}.jsonl"
+
+
+def read_transcript(root: Path, project: str = "", limit: int = 60) -> list[dict]:
+    """The conversation itself, so closing the tab does not lose it.
+
+    chat.jsonl is an audit log: what was asked, what it cost, how long it took.
+    It deliberately does not carry answers, because a cost log padded with prose
+    stops being readable. This is the other half, kept per project alongside the
+    session id, so reopening HiveFrame shows the thread the CLI is about to
+    resume rather than an empty box above a live conversation.
+    """
+    p = _transcript_path(root, project)
+    if not p.exists():
+        return []
+    rows = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows[-limit:]
+
+
 def clear_session(root: Path, project: str = "") -> None:
     """Start a fresh conversation. The old CLI session is not deleted, only
-    forgotten here, so it stays resumable from the terminal."""
+    forgotten here, so it stays resumable from the terminal. The transcript is
+    archived rather than removed, for the same reason: a decision trail that a
+    button can erase is not a trail."""
     p = _session_path(root, project)
     if p.exists():
         p.unlink()
+    t = _transcript_path(root, project)
+    if t.exists():
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        t.rename(t.with_suffix(f".{stamp}.jsonl"))
+
+
+def _split_steps(text: str) -> tuple[str, list[dict]]:
+    """Separate tool activity from the answer.
+
+    The CLI interleaves what it did with what it concluded. Read as one blob
+    that is noise; read as a step list above the answer it is provenance, which
+    is the whole argument for using an assistant on portfolio data at all. You
+    can see which file the number came from.
+    """
+    steps: list[dict] = []
+    prose: list[str] = []
+    cur: dict | None = None
+    lines = text.splitlines()
+    for n, line in enumerate(lines):
+        m = _STEP_RE.match(line)
+        if m:
+            cur = {"glyph": m.group(1), "title": m.group(2), "detail": []}
+            steps.append(cur)
+            continue
+        # A spinner glyph is a single character that also appears in ordinary
+        # prose, so it only counts as a step when the line beneath it is an
+        # indented detail line. That structure is what makes it unambiguous.
+        s = _SPINNER_RE.match(line)
+        if s and n + 1 < len(lines) and _STEP_DETAIL_RE.match(lines[n + 1]):
+            cur = {"glyph": "·", "title": s.group(2), "detail": []}
+            steps.append(cur)
+            continue
+        d = _STEP_DETAIL_RE.match(line)
+        if d and cur is not None:
+            cur["detail"].append(d.group(1))
+            continue
+        if line.strip() and cur is not None:
+            cur = None
+        prose.append(line)
+    for s in steps:
+        s["detail"] = "\n".join(s["detail"]).strip()
+    # Collapsing the blank runs the stripped steps leave behind, so the answer
+    # does not open with a screenful of nothing.
+    prose_text = re.sub(r"\n{3,}", "\n\n", "\n".join(prose)).strip()
+    return prose_text, steps
 
 
 def _strip_footer(text: str) -> str:
@@ -248,6 +336,7 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
             credits = None
 
     answer = _strip_footer(out.stdout or "")
+    answer, steps = _split_steps(answer)
 
     rec = {
         "at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -264,7 +353,16 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
     with (root / CHAT_LOG).open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec) + "\n")
 
-    return {"answer": answer, **rec}
+    # The audit log above answers "what did this cost". The transcript answers
+    # "what did we decide", which is the one a portfolio conversation is for.
+    with _transcript_path(root, project).open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"role": "user", "at": rec["at"], "text": prompt}) + "\n")
+        fh.write(json.dumps({
+            "role": "assistant", "at": rec["at"], "text": answer, "steps": steps,
+            "model": rec["model"], "credits": credits, "seconds": elapsed,
+        }) + "\n")
+
+    return {"answer": answer, "steps": steps, **rec}
 
 
 def history(root: Path, limit: int = 40) -> list[dict]:
