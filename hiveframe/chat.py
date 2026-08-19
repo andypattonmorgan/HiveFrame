@@ -129,11 +129,17 @@ def _strip_footer(text: str) -> str:
 
 
 def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
-        model: str = "", resume: bool = True) -> dict:
+        model: str = "", resume: bool = True, context: str = "") -> dict:
     """Run one turn and return the answer with its cost and provenance.
 
     root is the store directory: the session id and the turn log live there, so
     a work conversation and a personal one never share history.
+
+    context is what the UI says is on screen. It is prepended rather than
+    merged into the prompt, and labelled, so the assistant can tell the
+    difference between what Andy asked and what the tool volunteered. The turn
+    log records the question alone, because a log of prompts padded with state
+    is unreadable a week later.
     """
     prompt = (prompt or "").strip()
     if not prompt:
@@ -143,7 +149,16 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
     if not state["ok"]:
         raise ChatError(state["reason"])
 
-    argv = [state["path"], "-p", prompt, "--no-color", "--log-level", "none"]
+    sent = prompt
+    if context.strip():
+        sent = (
+            "Context from the HiveFrame UI, which the user did not type:\n"
+            f"{context.strip()}\n\n"
+            "Answer this, using that context only where it is relevant:\n"
+            f"{prompt}"
+        )
+
+    argv = [state["path"], "-p", sent, "--no-color", "--log-level", "none"]
     argv += ["--model", model or DEFAULT_MODEL]
 
     for t in ALLOW_TOOLS:
@@ -196,6 +211,7 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
     rec = {
         "at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "prompt": prompt,
+        "context_chars": len(context or ""),
         "answer_chars": len(answer),
         "session": session,
         "model": model or DEFAULT_MODEL,

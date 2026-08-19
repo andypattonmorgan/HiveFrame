@@ -295,7 +295,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             answer = chatmod.ask(data.get("prompt", ""), root,
                                  dirs=tuple(dirs),
-                                 model=data.get("model", ""))
+                                 model=data.get("model", ""),
+                                 context=data.get("context", ""))
         except ChatError as e:
             return self._json({"error": str(e)}, 400)
         return self._json({"ok": True, **answer})
