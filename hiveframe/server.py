@@ -301,9 +301,16 @@ class Handler(BaseHTTPRequestHandler):
             node["preview"] = kind
             node["editable"] = kind in ("text", "html")
             try:
-                node["size"] = path.stat().st_size
+                st = path.stat()
+                node["size"] = st.st_size
+                # mtime lets the browser tell which files a chat turn touched,
+                # by diffing a tree taken before the turn against one after.
+                # That is the only signal available: the assistant edits files
+                # through its own tools and does not report what it wrote.
+                node["mtime"] = int(st.st_mtime)
             except OSError:
                 pass
+
         return node
 
     def _tree_payload(self, board: Board, scope: str = "all",

@@ -306,6 +306,40 @@
             margin-left: -4px
         }
 
+        /* A file the assistant just wrote. It stays marked until you open it,
+           so a change made while you were reading something else does not
+           scroll past unnoticed. */
+        .ftree .tree-item.touched>.lnk::after {
+            content: "changed";
+            font-size: 9.5px;
+            font-weight: 700;
+            letter-spacing: .04em;
+            color: #0f1115;
+            background: var(--acc);
+            border-radius: 3px;
+            padding: 1px 4px;
+            margin-left: 6px;
+            vertical-align: 1px
+        }
+
+        .ftree .tree-dir.hastouch>summary>.tree-name::after {
+            content: "•";
+            color: var(--acc);
+            margin-left: 5px;
+            font-weight: 700
+        }
+
+        .fhist {
+            background: #20252f;
+            color: var(--dim);
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            font: inherit;
+            font-size: 11px;
+            max-width: 96px;
+            padding: 2px 4px
+        }
+
         .ftree .tree-dir>summary {
             padding: 3px 0;
             font-size: 12.5px;
@@ -1173,7 +1207,8 @@
             <div class="brand"><i class="hex"></i><b>HiveFrame</b><span id="cnt"></span></div>
             <div class="railhead">Projects</div>
             <div class="plist" id="plist"></div>
-            <div class="railhead railsplit">Files<button class="sm" id="ftreerefresh"
+            <div class="railhead railsplit">Files<select class="fhist" id="fhist"
+                    title="Files you have opened in this project"></select><button class="sm" id="ftreerefresh"
                     title="Re-read this project's folders">Refresh</button></div>
             <div class="ftree" id="ftree"></div>
             <div class="railfoot" id="railfoot"></div>
@@ -1662,6 +1697,12 @@
             box.value = "";
 
             const node = addTurn(v, "", "");
+            /* Taken before the turn so the after-state has something to be
+               compared against. The project is captured too, because you may
+               switch projects while the answer streams. */
+            const watchId = SEL;
+            const before = mtimeMap(TREE[watchId]);
+
             const aEl = node.querySelector(".a");
             const stepBox = document.createElement("div");
             stepBox.className = "steps";
@@ -1750,7 +1791,9 @@
             RUN = null;
             chatBusy(false);
             paintCtx();
+            markChangedFiles(watchId, before);
         }
+
 
         /* ---- tools: shared capabilities, not project members ----
            A tool is declared once and referenced by id. Ordering is by dependant count
@@ -1965,10 +2008,69 @@
             </details>`;
         }
 
+        /* Files the assistant changed during the last turn, and the files you
+           have opened before. Both are per project, because a change in one
+           project is not news while you are reading another. */
+        let TOUCHED = {};
+        const HIST_KEY = "hiveframe.filehistory", HIST_MAX = 25;
+        let HISTORY = {};
+        try { HISTORY = JSON.parse(localStorage.getItem(HIST_KEY) || "{}"); } catch (e) { HISTORY = {}; }
+
+        function histAdd(path, label) {
+            if (!SEL) return;
+            const list = (HISTORY[SEL] || []).filter(e => e.path !== path);
+            list.unshift({ path, label: label || path.split("/").pop() });
+            HISTORY[SEL] = list.slice(0, HIST_MAX);
+            try { localStorage.setItem(HIST_KEY, JSON.stringify(HISTORY)); } catch (e) { }
+            drawHist();
+        }
+
+        function drawHist() {
+            const sel = document.getElementById("fhist");
+            if (!sel) return;
+            const list = HISTORY[SEL] || [];
+            /* Disabled rather than hidden. A control that appears only once it
+               has content reads as a glitch the first time it shows up. */
+            sel.disabled = !list.length;
+            sel.innerHTML = `<option value="">${list.length ? "Recent" : "No history"}</option>` +
+                list.map(e => `<option value="${esc(e.path)}" title="${esc(e.path)}">${esc(e.label)}</option>`).join("");
+            sel.value = "";
+        }
+
+        /* mtime map of every file in the project, used to see what a chat turn
+           wrote. The assistant edits through its own tools and does not report
+           what it touched, so the file system is the only honest witness. */
+        function mtimeMap(t) {
+            const out = {};
+            const walk = n => {
+                if (!n) return;
+                if (n.kind === "file") { if (n.mtime) out[n.path] = n.mtime; return; }
+                (n.children || []).forEach(walk);
+            };
+            (t && t.roots || []).forEach(r => walk(r.tree));
+            return out;
+        }
+
+        async function markChangedFiles(id, before) {
+            if (!id) return;
+            const t = await loadTree(id, true);
+            const after = mtimeMap(t);
+            const changed = Object.keys(after).filter(p => before[p] !== after[p]);
+            if (!changed.length) return;
+            TOUCHED[id] = changed;
+            drawFiles();
+            /* Open the change rather than only flagging it. A notice you have
+               to go and act on is one more step between the edit and reading
+               it. If several files changed, the first is opened and the rest
+               stay marked. */
+            if (id === SEL && !FILE_DIRTY) openFile(changed[0]);
+        }
+
         /* The tree lives in the rail, so it renders into its own element rather
            than into the main view. It survives a tab change, which is the point:
            you can read a file while looking at Triage. */
         function drawFiles() {
+            drawHist();
             const el = document.getElementById("ftree");
             if (!el) return;
             const id = SEL;
@@ -1982,7 +2084,26 @@
                 <div class="rlabel">${esc(r.label)}</div>
                 ${treeNode(Object.assign({ open: true, bare: true }, r.tree))}
             `).join("") + (t.note ? `<p class="empty">${esc(t.note)}</p>` : "");
+            markTouched();
+            markOpenFile();
         }
+
+        /* Marks are applied after render rather than baked into the row, so
+           clearing one does not rebuild the tree and collapse your folders. */
+        function markTouched() {
+            const set = new Set(TOUCHED[SEL] || []);
+            document.querySelectorAll("#ftree .tree-item").forEach(el => {
+                el.classList.toggle("touched", set.has(el.getAttribute("title")));
+            });
+            document.querySelectorAll("#ftree .tree-dir").forEach(d => {
+                const hit = !!d.querySelector(".tree-item.touched");
+                d.classList.toggle("hastouch", hit);
+                /* A change inside a folder you have closed is a change you will
+                   not see, so open the path to it. */
+                if (hit) d.open = true;
+            });
+        }
+
 
 
         /* ---- preview panel: open, read, edit, save ----
@@ -1999,12 +2120,19 @@
         async function openFile(path) {
             if (FILE_DIRTY && !confirm("Unsaved changes will be lost. Open anyway?")) return;
             FILE = { path, loading: true }; FILE_DIRTY = false; FILE_SRC = false;
+            /* Opening it is reading it, so the mark has done its job. */
+            if (SEL && TOUCHED[SEL]) {
+                TOUCHED[SEL] = TOUCHED[SEL].filter(p => p !== path);
+                markTouched();
+            }
             showPrev(true); drawPrev();
             const r = await fetch("/api/file?path=" + encodeURIComponent(path));
             const d = await r.json();
             FILE = r.ok ? d : { path, error: d.error || "could not open" };
+            if (r.ok) histAdd(path, d.rel || d.name);
             drawPrev();
         }
+
 
         function closeFile() {
             if (FILE_DIRTY && !confirm("Unsaved changes will be lost. Close anyway?")) return;
@@ -2512,6 +2640,13 @@
         document.querySelectorAll(".tab[data-v]").forEach(b => b.onclick = () => setView(b.dataset.v));
 
         document.getElementById("ftreerefresh").onclick = () => { if (SEL) loadTree(SEL, true); };
+
+        document.getElementById("fhist").onchange = e => {
+            const p = e.target.value;
+            e.target.value = "";
+            if (p) openFile(p);
+        };
+
 
         /* Chat controls are bound once, because the rail is markup rather than a
            re-rendered string. That is most of the reason it is a rail. */
