@@ -71,6 +71,8 @@ def dumps(project) -> str:
         L.append(_kv("horizon", project.horizon, 7))
     L.append(_kv("status", project.status, 7))
     L.append(_kv("store", project.store, 7))
+    if project.folder:
+        L.append(_kv("folder", project.folder, 7))
     if project.started:
         L.append(_kv("started", project.started, 7))
     if project.uses:

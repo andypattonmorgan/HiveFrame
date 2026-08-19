@@ -36,6 +36,14 @@ from .edit import EditError
 from .writer import save, save_tools
 
 WEB = Path(__file__).resolve().parent / "web"
+SESSION_STATE_ROOT = Path.home() / ".copilot" / "session-state"
+TREE_MAX_DEPTH = 5
+# A project folder is often a repo, and a repo's real contents are a rounding
+# error next to its machinery. Listing .git turns a file tree into noise.
+TREE_SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__",
+                  ".venv", "venv", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+                  ".idea", ".DS_Store", "dist", "build", ".next", ".tox"}
+TREE_MAX_ENTRIES = 200
 
 
 def vpn_state() -> dict:
@@ -73,6 +81,7 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
             "horizon": p.horizon,
             "status": p.status,
             "store": p.store,
+            "folders": [{"label": lb, "path": pt} for lb, pt in p.folders],
             "score": round(pts, 1),
             "why": why,
             "next_move": ({"id": nxt.id, "title": nxt.title,
@@ -164,6 +173,113 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _session_root(self) -> Path | None:
+        sid = os.environ.get("COPILOT_AGENT_SESSION_ID") or os.environ.get("HIVEFRAME_SESSION_ID")
+        if not sid:
+            return None
+        return SESSION_STATE_ROOT / sid / "files"
+
+    def _tree_path(self, root: Path, rel: str = "") -> Path:
+        base = root.expanduser().resolve()
+        target = (base / Path(rel)).resolve() if rel else base
+        try:
+            target.relative_to(base)
+        except ValueError as e:
+            raise StoreError("path escapes the selected root") from e
+        return target
+
+    def _tree_node(self, path: Path, depth: int = 0) -> dict:
+        node = {
+            "name": path.name or str(path),
+            "path": str(path),
+            "kind": "dir" if path.is_dir() else "file",
+            "exists": path.exists(),
+        }
+        if path.is_dir():
+            if depth >= TREE_MAX_DEPTH:
+                node["truncated"] = True
+                node["children"] = []
+                return node
+            try:
+                entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+            except OSError as e:
+                node["error"] = str(e)
+                node["children"] = []
+                return node
+            entries = [e for e in entries
+                       if not (e.name in TREE_SKIP_DIRS or e.name.endswith(".bak"))]
+            if len(entries) > TREE_MAX_ENTRIES:
+                node["truncated"] = True
+                node["hidden"] = len(entries) - TREE_MAX_ENTRIES
+                entries = entries[:TREE_MAX_ENTRIES]
+            node["children"] = [self._tree_node(child, depth + 1) for child in entries]
+        else:
+            try:
+                node["size"] = path.stat().st_size
+            except OSError:
+                pass
+        return node
+
+    def _tree_payload(self, board: Board, scope: str = "all",
+                      project_id: str = "") -> dict:
+        roots = []
+        note = ""
+        if scope not in ("all", "work", "session", "project"):
+            raise StoreError(f"unknown tree scope: {scope}")
+
+        if scope == "project":
+            if not project_id:
+                raise StoreError("scope=project needs an id")
+            wanted = [p for p in board.load(tuple(board.roots))
+                      if p.id == project_id]
+            if not wanted:
+                raise StoreError(f"unknown project: {project_id}")
+            p = wanted[0]
+            for label, folder in p.folders:
+                path = Path(folder).expanduser()
+                roots.append({
+                    "label": label,
+                    "path": str(path),
+                    "exists": path.exists(),
+                    "tree": self._tree_node(path),
+                })
+            if not roots:
+                if p.source_file:
+                    roots.append({
+                        "label": "Project file",
+                        "path": str(p.source_file),
+                        "exists": Path(p.source_file).exists(),
+                        "tree": self._tree_node(Path(p.source_file)),
+                    })
+                note = ("No folder declared for this project. Add "
+                        'folder = "/path/..." under [project], or an artifact '
+                        "whose path is a directory.")
+            return {"generated": date.today().isoformat(),
+                    "project": p.id, "roots": roots, "note": note}
+
+        if scope in ("all", "work"):
+            root = board.root_for("work")
+            roots.append({
+                "label": "Work store",
+                "path": str(root),
+                "exists": root.exists(),
+                "tree": self._tree_node(root),
+            })
+
+        if scope in ("all", "session"):
+            root = self._session_root()
+            if root is not None:
+                roots.append({
+                    "label": "Session artifacts",
+                    "path": str(root),
+                    "exists": root.exists(),
+                    "tree": self._tree_node(root),
+                })
+
+        if not roots:
+            raise StoreError("no tree roots available")
+        return {"generated": date.today().isoformat(), "roots": roots}
+
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
@@ -197,6 +313,14 @@ class Handler(BaseHTTPRequestHandler):
             except StoreError as e:
                 return self._json({"error": str(e)}, 400)
             return self._json({"rows": read_log(root, name)})
+
+        if u.path == "/api/tree":
+            scope = q.get("scope", ["all"])[0]
+            pid = q.get("id", [""])[0]
+            try:
+                return self._json(self._tree_payload(Board.from_env(), scope, pid))
+            except StoreError as e:
+                return self._json({"error": str(e)}, 400)
 
         if u.path == "/api/chat/state":
             # Whether chat is usable at all, and this store's turn log. Cheap:
@@ -461,6 +585,21 @@ def selftest() -> int:
         print(f"  WARN: {len(scores) - len(set(scores))} project(s) tied on score")
     else:
         print(f"  ranking separates: {len(scores)} live project(s), no ties")
+
+    # The file view is scoped to the project in focus, so every path it offers
+    # must belong to that project and must be a directory that exists.
+    store_root = Path(board.roots["work"]).expanduser().resolve()
+    for p in projects:
+        for label, folder in p.folders:
+            fp = Path(folder).expanduser()
+            if not fp.is_dir():
+                print(f"  FAIL: {p.id} folder is not a directory: {folder}")
+                return 1
+            if p.folder and fp.resolve() == store_root:
+                print(f"  FAIL: {p.id} declares the whole work store as its folder")
+                return 1
+    scoped = sum(1 for p in projects if p.folders)
+    print(f"  folder scope: {scoped}/{len(projects)} project(s) resolve to their own folder")
 
     cap = capacity(projects, 10.0)
     print(f"  capacity: {cap['committed_h']}h committed against "

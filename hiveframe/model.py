@@ -152,6 +152,7 @@ class Project:
     horizon: str = ""             # H1 | H2 | H3
     status: str = "active"        # active | blocked | paused | done | killed
     store: str = "work"
+    folder: str = ""              # the working directory this project lives in
     started: date | None = None
     charter: Charter = field(default_factory=Charter)
     artifacts: list[Artifact] = field(default_factory=list)
@@ -159,6 +160,46 @@ class Project:
     relations: list[Relation] = field(default_factory=list)
     uses: list[str] = field(default_factory=list)   # tool ids, not tool copies
     source_file: Path | None = None
+
+    @property
+    def folders(self) -> list[tuple[str, str]]:
+        """The directories that belong to this project, as (label, path).
+
+        A declared ``folder`` is the whole answer. Otherwise the fallback is any
+        artifact whose path is a directory. A project is worked in a place, and
+        the file view should show that place rather than the whole store: a tree
+        that lists everything is the same context bleed the charter exists to
+        stop.
+
+        Nested paths are dropped in favour of the outermost one, so a folder is
+        not drawn twice.
+        """
+        out: list[tuple[str, str]] = []
+        if self.folder:
+            out.append(("Project folder", self.folder))
+        else:
+            for a in self.artifacts:
+                if not a.path:
+                    continue
+                try:
+                    if Path(a.path).expanduser().is_dir():
+                        out.append((a.label or "Folder", a.path))
+                except OSError:
+                    continue
+
+        kept: list[tuple[str, str]] = []
+        seen: list[Path] = []
+        for label, raw in out:
+            p = Path(raw).expanduser()
+            try:
+                resolved = p.resolve()
+            except OSError:
+                continue
+            if any(resolved == s or s in resolved.parents for s in seen):
+                continue
+            seen.append(resolved)
+            kept.append((label, str(p)))
+        return kept
 
     @property
     def open_tasks(self) -> list[Task]:
@@ -245,6 +286,7 @@ def load_project(path: Path) -> Project:
         horizon=p.get("horizon", ""),
         status=p.get("status", "active"),
         store=p.get("store", "work"),
+        folder=p.get("folder", ""),
         started=_as_date(p.get("started")),
         charter=charter,
         artifacts=artifacts,

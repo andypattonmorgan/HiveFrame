@@ -236,16 +236,32 @@
 
         /* Rendered answer. Portfolio questions come back as tables and lists,
            and a table shown as pipe characters is a table you will not read. */
-        .turn .a p { margin: 0 0 8px }
-        .turn .a ul, .turn .a ol { margin: 0 0 8px; padding-left: 18px }
-        .turn .a li { margin-bottom: 3px }
-        .turn .a h3 { font-size: 13px; margin: 10px 0 5px }
+        .turn .a p {
+            margin: 0 0 8px
+        }
+
+        .turn .a ul,
+        .turn .a ol {
+            margin: 0 0 8px;
+            padding-left: 18px
+        }
+
+        .turn .a li {
+            margin-bottom: 3px
+        }
+
+        .turn .a h3 {
+            font-size: 13px;
+            margin: 10px 0 5px
+        }
+
         .turn .a code {
             background: var(--line);
             padding: 1px 4px;
             border-radius: 3px;
             font-size: 12px
         }
+
         .turn .a pre {
             background: var(--line);
             padding: 8px;
@@ -253,19 +269,30 @@
             overflow-x: auto;
             margin: 0 0 8px
         }
-        .turn .a pre code { background: none; padding: 0 }
+
+        .turn .a pre code {
+            background: none;
+            padding: 0
+        }
+
         .turn .a table {
             border-collapse: collapse;
             font-size: 12px;
             margin: 0 0 8px;
             width: 100%
         }
-        .turn .a th, .turn .a td {
+
+        .turn .a th,
+        .turn .a td {
             border: 1px solid var(--line);
             padding: 3px 6px;
             text-align: left
         }
-        .turn .a th { color: var(--dim); font-weight: 600 }
+
+        .turn .a th {
+            color: var(--dim);
+            font-weight: 600
+        }
 
         /* What it did, above what it concluded. On portfolio data the step list
            is the provenance: you can see which file the number came from. */
@@ -273,18 +300,27 @@
             margin-bottom: 7px;
             font-size: 11px
         }
+
         .turn .steps details {
             border-left: 2px solid var(--accent);
             padding-left: 8px;
             margin-bottom: 3px
         }
+
         .turn .steps summary {
             color: var(--dim);
             cursor: pointer;
             list-style: none
         }
-        .turn .steps summary::-webkit-details-marker { display: none }
-        .turn .steps details.bad { border-left-color: var(--stop) }
+
+        .turn .steps summary::-webkit-details-marker {
+            display: none
+        }
+
+        .turn .steps details.bad {
+            border-left-color: var(--stop)
+        }
+
         .turn .steps pre {
             margin: 4px 0 0;
             color: var(--dim);
@@ -495,6 +531,52 @@
             color: var(--faint);
             font-size: 13px;
             padding: 6px 0
+        }
+
+        .tree-root {
+            display: grid;
+            gap: 8px
+        }
+
+        .tree-item {
+            padding: 2px 0
+        }
+
+        .tree-dir {
+            border: 1px solid #1e222b;
+            border-radius: 8px;
+            padding: 8px 10px;
+            background: #13161c
+        }
+
+        .tree-dir>summary {
+            list-style: none;
+            cursor: pointer;
+            display: flex;
+            align-items: baseline;
+            gap: 8px
+        }
+
+        .tree-dir>summary::-webkit-details-marker {
+            display: none
+        }
+
+        .tree-name {
+            color: var(--ink)
+        }
+
+        .tree-path {
+            color: var(--faint);
+            font-size: 11.5px;
+            word-break: break-all
+        }
+
+        .tree-children {
+            margin: 8px 0 0 12px;
+            padding-left: 12px;
+            border-left: 1px solid #1e222b;
+            display: grid;
+            gap: 6px
         }
 
         .bars {
@@ -858,7 +940,8 @@
             <div class="cctx" id="cctx">Checking...</div>
             <div class="cscroll" id="cscroll"></div>
             <div class="cfoot">
-                <textarea id="cprompt" rows="3" placeholder="Ask about what you are looking at. Enter to send."></textarea>
+                <textarea id="cprompt" rows="3"
+                    placeholder="Ask about what you are looking at. Enter to send."></textarea>
                 <div class="row" style="margin-top:7px;align-items:center;gap:8px">
                     <button id="csend">Send</button>
                     <button id="cstop" class="mini" style="display:none">Stop</button>
@@ -947,6 +1030,9 @@
            ask about, and by the time you arrive you are describing it from memory. */
 
         let CHAT = null, TURNS = [], CHAT_PROJ = null;
+        /* Keyed by project id: the tree follows focus, so one cached copy of
+           "everything" would be the bleed this view exists to prevent. */
+        let TREE = {};
 
         /* Answers are model output rendered into the page, so they are escaped.
            Trusting a generated string as HTML is how a helpful tool becomes an
@@ -1438,6 +1524,59 @@
                 : `<p class="empty">No decisions recorded yet.</p>`;
         }
 
+        async function loadTree(id, force = false) {
+            if (!id) return null;
+            if (TREE[id] && !force) return TREE[id];
+            const r = await fetch("/api/tree?scope=project&id=" + encodeURIComponent(id));
+            const data = await r.json();
+            TREE[id] = r.ok ? data
+                : {
+                    error: r.status === 404
+                        ? "Tree endpoint not served. This HiveFrame process predates it; restart the server."
+                        : (data.error || "tree unavailable")
+                };
+            if (VIEW === "project") draw();
+            return TREE[id];
+        }
+
+        function treeLeaf(n) {
+            const name = esc(n.name || n.path);
+            const path = esc(n.path || "");
+            const open = n.exists === false ? `<span class="gap">missing</span>` : "";
+            const size = typeof n.size === "number" ? `<span class="why">${n.size} B</span>` : "";
+            return `<div class="tree-item">${n.exists === false ? `<span class="missing">${name}</span>` : `<span class="lnk" onclick='reveal(${JSON.stringify(n.path)})'>${name}</span>`} ${open} ${size}<div class="tree-path">${path}</div></div>`;
+        }
+
+        function treeNode(n) {
+            if (n.kind === "file") return treeLeaf(n);
+            const children = (n.children || []).map(treeNode).join("") || `<div class="empty">Empty</div>`;
+            const flags = [n.exists === false ? `<span class="gap">missing</span>` : "",
+            n.truncated ? `<span class="gap">${n.hidden ? n.hidden + " more hidden" : "truncated"}</span>` : ""]
+                .filter(Boolean).join(" ");
+            return `<details class="tree-dir"${n.open ? " open" : ""}>
+                <summary><span class="tree-name">${esc(n.name || n.path)}</span>${flags ? ` <span class="why">${flags}</span>` : ""}</summary>
+                <div class="tree-children">${children}</div>
+            </details>`;
+        }
+
+        function treeSection(id) {
+            const t = TREE[id];
+            if (!t) {
+                loadTree(id);
+                return `<p class="empty">Loading folder…</p>`;
+            }
+            if (t.error) return `<p class="empty">${esc(t.error)}</p>`;
+            return `
+  <h2>Folder<span class="toolbar"><button class="sm" onclick='loadTree(${JSON.stringify(id)}, true)'>Refresh</button></span></h2>
+  <p class="hint">This project's folders only. Expand to browse, click a file to reveal it in Finder.${t.note ? ` <span class="gap">${esc(t.note)}</span>` : ""}</p>
+  ${(t.roots || []).map(r => `
+    <div class="card">
+      <h2>${esc(r.label)} <span class="why">${esc(r.path)}</span></h2>
+      ${treeNode(Object.assign({ open: true }, r.tree))}
+    </div>`).join("") || `<p class="empty">No folder declared for this project.</p>`}
+`;
+        }
+
         function projectView() {
             const p = proj(SEL);
             if (!p) return `<p class="empty">No projects. Add a .toml file to the projects directory.</p>`;
@@ -1459,6 +1598,8 @@
   <h1>${p.name}</h1>
   <p class="lede">${p.kind} · ${p.horizon || "no horizon"} · ${p.status} ·
      score ${p.score} <span class="why">(${p.why.join("; ") || "no signals"})</span></p>
+
+  ${treeSection(p.id)}
 
   <div class="card charter">
     <h2>Charter${c.complete ? "" : ' <span class="gap">&nbsp;incomplete</span>'}

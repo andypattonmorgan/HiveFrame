@@ -25,8 +25,11 @@ PORT="${PORT:-8787}"
 PY="${PY:-/opt/homebrew/bin/python3.14}"
 
 # The work store lives outside this repo on purpose: the tool is public, the
-# portfolio is not.
-export HIVEFRAME_WORK="${HIVEFRAME_WORK:-/Users/D112236/Library/CloudStorage/OneDrive-KaiserPermanente/KPKM/hiveframe/projects}"
+# portfolio is not. It sits under KaiserKM rather than KPKM because it is the
+# tool's operating data, holding every project's board, and not the content of
+# any one project. The HiveFrame *project* (planning, meetings, decisions about
+# building this) is a separate thing and lives at KPKM/HiveFrame.
+export HIVEFRAME_WORK="${HIVEFRAME_WORK:-/Users/D112236/Library/CloudStorage/OneDrive-KaiserPermanente/KaiserKM/hiveframe-store/projects}"
 
 cd "$(dirname "$0")"
 
