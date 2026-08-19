@@ -602,10 +602,45 @@
             flex: 0 0 auto
         }
 
+        /* A grip above the box, not the native corner grip. The native one is
+           8px in a corner that sits next to the send button, and it does not
+           persist. This one is the full width of the panel and remembers. */
+        .cgrip {
+            height: 9px;
+            margin: -10px -14px 6px;
+            cursor: row-resize;
+            position: relative
+        }
+
+        .cgrip::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 4px;
+            width: 34px;
+            margin-left: -17px;
+            height: 2px;
+            border-radius: 2px;
+            background: var(--line);
+            transition: background .12s
+        }
+
+        .cgrip:hover::after,
+        .cgrip.dragging::after {
+            background: var(--acc)
+        }
+
+        body.rowdrag {
+            cursor: row-resize;
+            user-select: none
+        }
+
         .cfoot textarea {
             width: 100%;
             box-sizing: border-box;
-            resize: vertical;
+            /* Height is driven by the grip, so the native corner handle would
+               be a second control fighting the first. */
+            resize: none;
             background: var(--panel);
             color: var(--ink);
             border: 1px solid var(--line);
@@ -1347,6 +1382,7 @@
             <div class="cctx" id="cctx">Checking...</div>
             <div class="cscroll" id="cscroll"></div>
             <div class="cfoot">
+                <div class="cgrip" id="cgrip" title="Drag to resize the message box"></div>
                 <textarea id="cprompt" rows="3"
                     placeholder="Ask about what you are looking at. Enter to send."></textarea>
                 <div class="row" style="margin-top:7px;align-items:center;gap:8px">
@@ -1895,6 +1931,12 @@
 
             const box = document.getElementById("cprompt");
             box.value = lines.join("\n");
+            /* A twelve-line draft in a three-line box is a draft you will send
+               without reading. Grow to fit it, but never shrink: a height you
+               chose is not ours to take back. */
+            const need = lines.length * 18 + 16;
+            if (box.getBoundingClientRect().height < need) setPromptH(need);
+
             /* Chat may be collapsed. Loading a prompt into a panel you cannot
                see is a button that appears to do nothing. */
             document.getElementById("app").classList.remove("nochat");
@@ -3050,6 +3092,56 @@
         document.querySelectorAll(".tab[data-v]").forEach(b => b.onclick = () => setView(b.dataset.v));
 
         document.getElementById("ftreerefresh").onclick = () => { if (SEL) loadTree(SEL, true); };
+
+        /* ---- message box height ----
+           A three-line box is right for a question and wrong for a drafted task
+           instruction, which is the thing the Ask button now puts in it. Dragged
+           up, not auto-grown: an input that resizes itself while you type moves
+           the text under the cursor.
+
+           Height is saved, and clamped on load, so a box dragged tall on a big
+           display does not swallow the conversation on a laptop. */
+        const CBOX_KEY = "hiveframe.promptheight";
+        const CBOX_MIN = 54;
+
+        function setPromptH(px) {
+            const box = document.getElementById("cprompt");
+            const max = Math.max(CBOX_MIN, innerHeight - 260);
+            const h = Math.min(max, Math.max(CBOX_MIN, px));
+            box.style.height = h + "px";
+            return h;
+        }
+
+        try {
+            const s = parseInt(localStorage.getItem(CBOX_KEY) || "", 10);
+            if (s) setPromptH(s);
+        } catch (e) { }
+
+        document.getElementById("cgrip").addEventListener("pointerdown", ev => {
+            const g = ev.currentTarget;
+            const box = document.getElementById("cprompt");
+            const start = ev.clientY;
+            const from = box.getBoundingClientRect().height;
+            g.classList.add("dragging");
+            document.body.classList.add("rowdrag");
+            g.setPointerCapture(ev.pointerId);
+            /* Up is bigger, because the box grows against the conversation
+               above it rather than off the bottom of the window. */
+            const move = e => setPromptH(from - (e.clientY - start));
+            const up = e => {
+                g.releasePointerCapture(ev.pointerId);
+                g.classList.remove("dragging");
+                document.body.classList.remove("rowdrag");
+                g.removeEventListener("pointermove", move);
+                g.removeEventListener("pointerup", up);
+                const h = setPromptH(from - (e.clientY - start));
+                try { localStorage.setItem(CBOX_KEY, String(h)); } catch (e2) { }
+            };
+            g.addEventListener("pointermove", move);
+            g.addEventListener("pointerup", up);
+            ev.preventDefault();
+        });
+
 
         document.getElementById("fhist").onchange = e => {
             const p = e.target.value;
