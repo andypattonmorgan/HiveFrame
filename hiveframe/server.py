@@ -30,6 +30,8 @@ from urllib.parse import urlparse, parse_qs
 from .model import Board, StoreError, capacity, score, tool_usage
 from .verdict import VerdictError, capture, read_log, record_verdict
 from . import edit as edits
+from . import chat as chatmod
+from .chat import ChatError
 from .edit import EditError
 from .writer import save, save_tools
 
@@ -196,6 +198,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 400)
             return self._json({"rows": read_log(root, name)})
 
+        if u.path == "/api/chat/state":
+            # Whether chat is usable at all, and this store's turn log. Cheap:
+            # no credits are spent answering this.
+            try:
+                root = Board.from_env().root_for(q.get("store", ["work"])[0])
+            except StoreError as e:
+                return self._json({"error": str(e)}, 400)
+            state = chatmod.available()
+            return self._json({
+                "cli": state,
+                "session": chatmod.read_session(root),
+                "model": chatmod.DEFAULT_MODEL,
+                "allow": list(chatmod.ALLOW_TOOLS),
+                "deny": list(chatmod.DENY_TOOLS),
+                "history": chatmod.history(root),
+            })
+
         if u.path.startswith("/static/"):
             return self._file(WEB / u.path[len("/static/"):])
 
@@ -254,7 +273,32 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/tool":
             return self._tool(board, store, data)
 
+        if u.path == "/api/chat":
+            return self._chat(board, store, root, data)
+
         self._json({"error": "not found"}, 404)
+
+    def _chat(self, board, store, root, data):
+        """One turn against the Copilot CLI.
+
+        The store decides which conversation this is: session id and turn log
+        live in the store root, so work and personal never share history.
+        """
+        if data.get("reset"):
+            chatmod.clear_session(root)
+            return self._json({"ok": True, "reset": True})
+
+        dirs = [root]
+        repo = Path(__file__).resolve().parent.parent
+        if repo not in dirs:
+            dirs.append(repo)
+        try:
+            answer = chatmod.ask(data.get("prompt", ""), root,
+                                 dirs=tuple(dirs),
+                                 model=data.get("model", ""))
+        except ChatError as e:
+            return self._json({"error": str(e)}, 400)
+        return self._json({"ok": True, **answer})
 
     def _tool(self, board, store, data):
         """Registry edits. The registry is one file per store, not per project."""
@@ -448,6 +492,12 @@ def selftest() -> int:
                     return 1
                 except EditError:
                     print("  retiring a depended-on tool is refused")
+
+    state = chatmod.available()
+    print(f"  chat CLI: {state.get('version') or state.get('reason')}")
+    assert "write" in chatmod.DENY_TOOLS, "the write verb must be denied by default"
+    assert not any("--allow-all" in t for t in chatmod.ALLOW_TOOLS)
+    print("  chat denies the write verb and never allows all tools")
 
     print("selftest OK")
     return 0

@@ -8,3 +8,5 @@ projects/
 # Backups written beside a project file on a structural edit. The file itself
 # lives in a synced or git-backed directory, which is the real history.
 *.bak
+.chat_session
+chat.jsonl

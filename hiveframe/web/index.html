@@ -1,279 +1,889 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HiveFrame</title>
-<style>
-  :root{
-    --bg:#0f1115; --panel:#171a21; --rail:#13161c; --line:#262b35;
-    --ink:#e8eaed; --dim:#9aa3b2; --faint:#6b7280;
-    --acc:#f2b134; --ok:#27ae60; --warn:#f2994a; --stop:#eb5757; --info:#4c9aff;
-  }
-  *{box-sizing:border-box}
-  html,body{height:100%}
-  body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
-       font:14.5px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
-  .app{display:grid;grid-template-columns:290px 1fr;height:100vh}
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HiveFrame</title>
+    <style>
+        :root {
+            --bg: #0f1115;
+            --panel: #171a21;
+            --rail: #13161c;
+            --line: #262b35;
+            --ink: #e8eaed;
+            --dim: #9aa3b2;
+            --faint: #6b7280;
+            --acc: #f2b134;
+            --ok: #27ae60;
+            --warn: #f2994a;
+            --stop: #eb5757;
+            --info: #4c9aff;
+        }
 
-  /* ---- left rail: the projects, always visible ---- */
-  .rail{background:var(--rail);border-right:1px solid var(--line);
-        display:flex;flex-direction:column;overflow:hidden}
-  .brand{padding:16px 16px 12px;border-bottom:1px solid var(--line);
-         display:flex;align-items:center;gap:9px}
-  .hex{width:18px;height:20px;flex:none;
-       background:var(--acc);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
-  .brand b{font-size:15px;font-weight:650;letter-spacing:.01em}
-  .brand span{color:var(--faint);font-size:11px;margin-left:auto}
-  .railhead{padding:11px 16px 7px;color:var(--faint);font-size:11px;
-            letter-spacing:.07em;text-transform:uppercase}
-  .plist{overflow-y:auto;flex:1;padding-bottom:10px}
-  .pitem{padding:9px 16px;cursor:pointer;border-left:2px solid transparent;
-         display:grid;grid-template-columns:1fr auto;gap:3px 8px}
-  .pitem:hover{background:#1a1e26}
-  .pitem.on{background:#1d222c;border-left-color:var(--acc)}
-  .pname{font-size:13.5px;font-weight:550;grid-column:1}
-  .pmeta{grid-column:1;color:var(--faint);font-size:11.5px}
-  .pscore{grid-column:2;grid-row:1/3;align-self:center;color:var(--dim);
-          font-size:11px;font-variant-numeric:tabular-nums;
-          background:#20252f;border-radius:4px;padding:2px 6px;height:fit-content}
-  .hz{display:inline-block;font-size:10px;font-weight:700;padding:1px 5px;
-      border-radius:3px;margin-right:5px;color:#0f1115}
-  .railfoot{border-top:1px solid var(--line);padding:10px 16px;font-size:11.5px;
-            color:var(--faint)}
-  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px}
+        * {
+            box-sizing: border-box
+        }
 
-  /* ---- main ---- */
-  .main{overflow-y:auto;padding:0 0 60px}
-  .topbar{position:sticky;top:0;background:var(--bg);z-index:4;
-          border-bottom:1px solid var(--line);padding:14px 26px;
-          display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .tab{background:var(--panel);color:var(--ink);border:1px solid var(--line);
-       border-radius:999px;padding:6px 13px;font-size:12.5px;cursor:pointer}
-  .tab:hover{border-color:#3a4150}
-  .tab.on{background:var(--ink);color:#0f1115;border-color:var(--ink);font-weight:600}
-  .spacer{flex:1}
-  .wrap{padding:22px 26px;max-width:1180px}
-  h1{margin:0 0 4px;font-size:20px;font-weight:650}
-  .lede{color:var(--dim);font-size:13.5px;margin:0 0 18px}
+        html,
+        body {
+            height: 100%
+        }
 
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;
-        padding:16px 18px;margin-bottom:16px}
-  .card h2{margin:0 0 12px;font-size:13px;color:var(--dim);
-           letter-spacing:.06em;text-transform:uppercase;font-weight:600}
-  .charter{border-left:3px solid var(--acc)}
-  .crow{display:grid;grid-template-columns:104px 1fr;gap:10px;
-        padding:7px 0;border-bottom:1px solid #1e222b;font-size:13.5px}
-  .crow:last-child{border-bottom:0}
-  .ck{color:var(--faint);font-size:11.5px;letter-spacing:.05em;
-      text-transform:uppercase;padding-top:2px}
-  .gap{color:var(--warn);font-style:italic}
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            overflow: hidden;
+            font: 14.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif
+        }
 
-  table{border-collapse:collapse;width:100%;font-size:13.5px}
-  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #1e222b;
-        vertical-align:top}
-  th{color:var(--faint);font-size:11px;letter-spacing:.05em;
-     text-transform:uppercase;font-weight:600}
-  tr:last-child td{border-bottom:0}
-  td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
-  .chip{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;
-        border-radius:3px;color:#0f1115;margin-right:4px}
-  .lnk{color:var(--info);cursor:pointer;text-decoration:none}
-  .lnk:hover{text-decoration:underline}
-  .missing{color:var(--stop)}
-  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-        font-size:11.5px;color:var(--faint);word-break:break-all}
-  .empty{color:var(--faint);font-size:13px;padding:6px 0}
+        .app {
+            display: grid;
+            grid-template-columns: 290px 1fr;
+            height: 100vh
+        }
 
-  .bars{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
-  .stat{background:#13161c;border:1px solid var(--line);border-radius:9px;padding:12px 14px}
-  .stat .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
-  .stat .k{color:var(--faint);font-size:11.5px;letter-spacing:.05em;text-transform:uppercase}
-  .stat .n{color:var(--dim);font-size:12px;margin-top:4px}
+        /* ---- left rail: the projects, always visible ---- */
+        .rail {
+            background: var(--rail);
+            border-right: 1px solid var(--line);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden
+        }
 
-  .why{color:var(--faint);font-size:12px}
-  .rsn{width:100%;min-width:190px;background:#0f1115;border:1px solid var(--line);
-       border-radius:6px;padding:6px 8px;color:var(--ink);font:inherit;font-size:12.5px}
-  .vrow{display:flex;gap:5px;margin-top:6px}
-  .vb{background:#20252f;color:var(--dim);border:1px solid var(--line);border-radius:6px;
-      padding:4px 9px;font-size:11.5px;cursor:pointer}
-  .vb:hover{border-color:#3a4150;color:var(--ink)}
-  .vb.kill:hover{border-color:var(--stop);color:var(--stop)}
+        .brand {
+            padding: 16px 16px 12px;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            align-items: center;
+            gap: 9px
+        }
 
-  /* ---- editing ---- */
-  .ed{background:#0f1115;border:1px solid var(--line);border-radius:6px;
-      padding:6px 8px;color:var(--ink);font:inherit;font-size:13px;width:100%}
-  .ed:focus{outline:none;border-color:var(--acc)}
-  textarea.ed{resize:vertical;min-height:52px;line-height:1.5}
-  .edit-on .crow span.val{display:none}
-  .crow .val{white-space:pre-wrap}
-  .hint{color:var(--faint);font-size:11.5px;margin-top:5px}
-  .toolbar{display:flex;gap:7px;align-items:center;margin-left:auto}
-  .sm{background:#20252f;color:var(--dim);border:1px solid var(--line);
-      border-radius:6px;padding:4px 10px;font-size:11.5px;cursor:pointer}
-  .sm:hover{border-color:#3a4150;color:var(--ink)}
-  .sm.pri{background:var(--acc);color:#0f1115;border-color:var(--acc);font-weight:650}
-  .card h2{display:flex;align-items:center}
-  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
-  .fl{display:flex;gap:6px;align-items:center;color:var(--dim);font-size:12.5px}
-  .saved{color:var(--ok);font-size:11.5px;margin-left:8px}
-  .flag{display:flex;gap:9px;padding:9px 0;border-bottom:1px solid #1e222b;font-size:13.5px}
-  .flag:last-child{border-bottom:0}
-  .flag .b{width:3px;border-radius:2px;flex:none}
+        .hex {
+            width: 18px;
+            height: 20px;
+            flex: none;
+            background: var(--acc);
+            clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%)
+        }
 
-  /* ---- focus ---- */
-  .focus{position:fixed;right:22px;bottom:22px;width:310px;background:var(--panel);
-         border:1px solid var(--line);border-radius:12px;z-index:20;
-         box-shadow:0 10px 30px rgba(0,0,0,.45)}
-  .fhead{padding:11px 14px;border-bottom:1px solid var(--line);
-         display:flex;align-items:center;gap:8px}
-  .fhead b{font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--dim)}
-  .fbody{padding:14px}
-  .clock{font-size:38px;font-weight:600;font-variant-numeric:tabular-nums;
-         text-align:center;letter-spacing:.02em}
-  .ctx{text-align:center;color:var(--dim);font-size:12.5px;margin-top:2px;min-height:18px}
-  .cands{margin-top:12px;display:flex;flex-direction:column;gap:6px}
-  .cand{background:#13161c;border:1px solid var(--line);border-radius:7px;
-        padding:8px 10px;cursor:pointer;font-size:12.5px}
-  .cand:hover{border-color:var(--acc)}
-  .cand .t{font-weight:550}
-  .cand .r{color:var(--faint);font-size:11.5px;margin-top:2px}
-  .frow{display:flex;gap:7px;margin-top:12px}
-  .btn{flex:1;background:var(--acc);color:#0f1115;border:0;border-radius:7px;
-       padding:8px;font-size:12.5px;font-weight:650;cursor:pointer}
-  .btn.ghost{background:transparent;color:var(--dim);border:1px solid var(--line);font-weight:500}
-  .capture{width:100%;margin-top:10px;background:#0f1115;border:1px solid var(--line);
-           border-radius:7px;padding:8px 10px;color:var(--ink);font-size:12.5px;
-           font-family:inherit;resize:vertical;min-height:34px}
-  .caplbl{color:var(--faint);font-size:11px;margin-top:9px}
-  .mini{background:none;border:0;color:var(--faint);cursor:pointer;font-size:16px;
-        margin-left:auto;line-height:1}
-  .collapsed .fbody{display:none}
-</style>
+        .brand b {
+            font-size: 15px;
+            font-weight: 650;
+            letter-spacing: .01em
+        }
+
+        .brand span {
+            color: var(--faint);
+            font-size: 11px;
+            margin-left: auto
+        }
+
+        .railhead {
+            padding: 11px 16px 7px;
+            color: var(--faint);
+            font-size: 11px;
+            letter-spacing: .07em;
+            text-transform: uppercase
+        }
+
+        .plist {
+            overflow-y: auto;
+            flex: 1;
+            padding-bottom: 10px
+        }
+
+        .pitem {
+            padding: 9px 16px;
+            cursor: pointer;
+            border-left: 2px solid transparent;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 3px 8px
+        }
+
+        .pitem:hover {
+            background: #1a1e26
+        }
+
+        .pitem.on {
+            background: #1d222c;
+            border-left-color: var(--acc)
+        }
+
+        .pname {
+            font-size: 13.5px;
+            font-weight: 550;
+            grid-column: 1
+        }
+
+        .pmeta {
+            grid-column: 1;
+            color: var(--faint);
+            font-size: 11.5px
+        }
+
+        .pscore {
+            grid-column: 2;
+            grid-row: 1/3;
+            align-self: center;
+            color: var(--dim);
+            font-size: 11px;
+            font-variant-numeric: tabular-nums;
+            background: #20252f;
+            border-radius: 4px;
+            padding: 2px 6px;
+            height: fit-content
+        }
+
+        .hz {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-right: 5px;
+            color: #0f1115
+        }
+
+        .railfoot {
+            border-top: 1px solid var(--line);
+            padding: 10px 16px;
+            font-size: 11.5px;
+            color: var(--faint)
+        }
+
+        .dot {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            margin-right: 6px
+        }
+
+        /* ---- main ---- */
+        .main {
+            overflow-y: auto;
+            padding: 0 0 60px
+        }
+
+        .topbar {
+            position: sticky;
+            top: 0;
+            background: var(--bg);
+            z-index: 4;
+            border-bottom: 1px solid var(--line);
+            padding: 14px 26px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap
+        }
+
+        .tab {
+            background: var(--panel);
+            color: var(--ink);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 6px 13px;
+            font-size: 12.5px;
+            cursor: pointer
+        }
+
+        .tab:hover {
+            border-color: #3a4150
+        }
+
+        .tab.on {
+            background: var(--ink);
+            color: #0f1115;
+            border-color: var(--ink);
+            font-weight: 600
+        }
+
+        .spacer {
+            flex: 1
+        }
+
+        .wrap {
+            padding: 22px 26px;
+            max-width: 1180px
+        }
+
+        h1 {
+            margin: 0 0 4px;
+            font-size: 20px;
+            font-weight: 650
+        }
+
+        .lede {
+            color: var(--dim);
+            font-size: 13.5px;
+            margin: 0 0 18px
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 11px;
+            padding: 16px 18px;
+            margin-bottom: 16px
+        }
+
+        .card h2 {
+            margin: 0 0 12px;
+            font-size: 13px;
+            color: var(--dim);
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            font-weight: 600
+        }
+
+        .charter {
+            border-left: 3px solid var(--acc)
+        }
+
+        .crow {
+            display: grid;
+            grid-template-columns: 104px 1fr;
+            gap: 10px;
+            padding: 7px 0;
+            border-bottom: 1px solid #1e222b;
+            font-size: 13.5px
+        }
+
+        .crow:last-child {
+            border-bottom: 0
+        }
+
+        .ck {
+            color: var(--faint);
+            font-size: 11.5px;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            padding-top: 2px
+        }
+
+        .gap {
+            color: var(--warn);
+            font-style: italic
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 13.5px
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 8px 10px;
+            border-bottom: 1px solid #1e222b;
+            vertical-align: top
+        }
+
+        th {
+            color: var(--faint);
+            font-size: 11px;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            font-weight: 600
+        }
+
+        tr:last-child td {
+            border-bottom: 0
+        }
+
+        td.num {
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap
+        }
+
+        .chip {
+            display: inline-block;
+            font-size: 10.5px;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 3px;
+            color: #0f1115;
+            margin-right: 4px
+        }
+
+        .lnk {
+            color: var(--info);
+            cursor: pointer;
+            text-decoration: none
+        }
+
+        .lnk:hover {
+            text-decoration: underline
+        }
+
+        .missing {
+            color: var(--stop)
+        }
+
+        .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 11.5px;
+            color: var(--faint);
+            word-break: break-all
+        }
+
+        .empty {
+            color: var(--faint);
+            font-size: 13px;
+            padding: 6px 0
+        }
+
+        .bars {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 12px
+        }
+
+        .stat {
+            background: #13161c;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            padding: 12px 14px
+        }
+
+        .stat .v {
+            font-size: 22px;
+            font-weight: 650;
+            font-variant-numeric: tabular-nums
+        }
+
+        .stat .k {
+            color: var(--faint);
+            font-size: 11.5px;
+            letter-spacing: .05em;
+            text-transform: uppercase
+        }
+
+        .stat .n {
+            color: var(--dim);
+            font-size: 12px;
+            margin-top: 4px
+        }
+
+        .why {
+            color: var(--faint);
+            font-size: 12px
+        }
+
+        .rsn {
+            width: 100%;
+            min-width: 190px;
+            background: #0f1115;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 6px 8px;
+            color: var(--ink);
+            font: inherit;
+            font-size: 12.5px
+        }
+
+        .vrow {
+            display: flex;
+            gap: 5px;
+            margin-top: 6px
+        }
+
+        .vb {
+            background: #20252f;
+            color: var(--dim);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 4px 9px;
+            font-size: 11.5px;
+            cursor: pointer
+        }
+
+        .vb:hover {
+            border-color: #3a4150;
+            color: var(--ink)
+        }
+
+        .vb.kill:hover {
+            border-color: var(--stop);
+            color: var(--stop)
+        }
+
+        /* ---- editing ---- */
+        .ed {
+            background: #0f1115;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 6px 8px;
+            color: var(--ink);
+            font: inherit;
+            font-size: 13px;
+            width: 100%
+        }
+
+        .ed:focus {
+            outline: none;
+            border-color: var(--acc)
+        }
+
+        textarea.ed {
+            resize: vertical;
+            min-height: 52px;
+            line-height: 1.5
+        }
+
+        .edit-on .crow span.val {
+            display: none
+        }
+
+        .crow .val {
+            white-space: pre-wrap
+        }
+
+        .hint {
+            color: var(--faint);
+            font-size: 11.5px;
+            margin-top: 5px
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 7px;
+            align-items: center;
+            margin-left: auto
+        }
+
+        .sm {
+            background: #20252f;
+            color: var(--dim);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 11.5px;
+            cursor: pointer
+        }
+
+        .sm:hover {
+            border-color: #3a4150;
+            color: var(--ink)
+        }
+
+        .sm.pri {
+            background: var(--acc);
+            color: #0f1115;
+            border-color: var(--acc);
+            font-weight: 650
+        }
+
+        .card h2 {
+            display: flex;
+            align-items: center
+        }
+
+        .grid2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 8px
+        }
+
+        .fl {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            color: var(--dim);
+            font-size: 12.5px
+        }
+
+        .saved {
+            color: var(--ok);
+            font-size: 11.5px;
+            margin-left: 8px
+        }
+
+        .flag {
+            display: flex;
+            gap: 9px;
+            padding: 9px 0;
+            border-bottom: 1px solid #1e222b;
+            font-size: 13.5px
+        }
+
+        .flag:last-child {
+            border-bottom: 0
+        }
+
+        .flag .b {
+            width: 3px;
+            border-radius: 2px;
+            flex: none
+        }
+
+        /* ---- focus ---- */
+        .focus {
+            position: fixed;
+            right: 22px;
+            bottom: 22px;
+            width: 310px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            z-index: 20;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .45)
+        }
+
+        .fhead {
+            padding: 11px 14px;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            align-items: center;
+            gap: 8px
+        }
+
+        .fhead b {
+            font-size: 12.5px;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            color: var(--dim)
+        }
+
+        .fbody {
+            padding: 14px
+        }
+
+        .clock {
+            font-size: 38px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            text-align: center;
+            letter-spacing: .02em
+        }
+
+        .ctx {
+            text-align: center;
+            color: var(--dim);
+            font-size: 12.5px;
+            margin-top: 2px;
+            min-height: 18px
+        }
+
+        .cands {
+            margin-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px
+        }
+
+        .cand {
+            background: #13161c;
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            padding: 8px 10px;
+            cursor: pointer;
+            font-size: 12.5px
+        }
+
+        .cand:hover {
+            border-color: var(--acc)
+        }
+
+        .cand .t {
+            font-weight: 550
+        }
+
+        .cand .r {
+            color: var(--faint);
+            font-size: 11.5px;
+            margin-top: 2px
+        }
+
+        .frow {
+            display: flex;
+            gap: 7px;
+            margin-top: 12px
+        }
+
+        .btn {
+            flex: 1;
+            background: var(--acc);
+            color: #0f1115;
+            border: 0;
+            border-radius: 7px;
+            padding: 8px;
+            font-size: 12.5px;
+            font-weight: 650;
+            cursor: pointer
+        }
+
+        .btn.ghost {
+            background: transparent;
+            color: var(--dim);
+            border: 1px solid var(--line);
+            font-weight: 500
+        }
+
+        .capture {
+            width: 100%;
+            margin-top: 10px;
+            background: #0f1115;
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            padding: 8px 10px;
+            color: var(--ink);
+            font-size: 12.5px;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 34px
+        }
+
+        .caplbl {
+            color: var(--faint);
+            font-size: 11px;
+            margin-top: 9px
+        }
+
+        .mini {
+            background: none;
+            border: 0;
+            color: var(--faint);
+            cursor: pointer;
+            font-size: 16px;
+            margin-left: auto;
+            line-height: 1
+        }
+
+        .collapsed .fbody {
+            display: none
+        }
+    </style>
 </head>
+
 <body>
-<div class="app">
+    <div class="app">
 
-  <aside class="rail">
-    <div class="brand"><i class="hex"></i><b>HiveFrame</b><span id="cnt"></span></div>
-    <div class="railhead">Projects</div>
-    <div class="plist" id="plist"></div>
-    <div class="railfoot" id="railfoot"></div>
-  </aside>
+        <aside class="rail">
+            <div class="brand"><i class="hex"></i><b>HiveFrame</b><span id="cnt"></span></div>
+            <div class="railhead">Projects</div>
+            <div class="plist" id="plist"></div>
+            <div class="railfoot" id="railfoot"></div>
+        </aside>
 
-  <div class="main">
-    <div class="topbar">
-      <button class="tab on" data-v="project">Project</button>
-      <button class="tab" data-v="brief">Brief</button>
-      <button class="tab" data-v="triage">Triage</button>
-      <button class="tab" data-v="tools">Tools</button>
-      <button class="tab" data-v="capacity">Capacity</button>
-      <span class="spacer"></span>
-      <span class="why" id="stamp"></span>
+        <div class="main">
+            <div class="topbar">
+                <button class="tab on" data-v="project">Project</button>
+                <button class="tab" data-v="brief">Brief</button>
+                <button class="tab" data-v="triage">Triage</button>
+                <button class="tab" data-v="tools">Tools</button>
+                <button class="tab" data-v="capacity">Capacity</button>
+                <button class="tab" data-v="chat">Chat</button>
+                <span class="spacer"></span>
+                <span class="why" id="stamp"></span>
+            </div>
+            <div class="wrap" id="view"></div>
+        </div>
     </div>
-    <div class="wrap" id="view"></div>
-  </div>
-</div>
 
-<div class="focus" id="focus">
-  <div class="fhead">
-    <i class="hex" style="width:12px;height:14px"></i>
-    <b>Focus</b>
-    <button class="mini" id="fold">-</button>
-  </div>
-  <div class="fbody">
-    <div class="clock" id="clock">25:00</div>
-    <div class="ctx" id="ctx">Nothing selected</div>
-    <div class="cands" id="cands"></div>
-    <div class="frow">
-      <button class="btn" id="go">Start</button>
-      <button class="btn ghost" id="reset">Reset</button>
+    <div class="focus" id="focus">
+        <div class="fhead">
+            <i class="hex" style="width:12px;height:14px"></i>
+            <b>Focus</b>
+            <button class="mini" id="fold">-</button>
+        </div>
+        <div class="fbody">
+            <div class="clock" id="clock">25:00</div>
+            <div class="ctx" id="ctx">Nothing selected</div>
+            <div class="cands" id="cands"></div>
+            <div class="frow">
+                <button class="btn" id="go">Start</button>
+                <button class="btn ghost" id="reset">Reset</button>
+            </div>
+            <div class="caplbl">Interruption. Type it, keep going.</div>
+            <textarea class="capture" id="capture" placeholder="Park the thought here"></textarea>
+        </div>
     </div>
-    <div class="caplbl">Interruption. Type it, keep going.</div>
-    <textarea class="capture" id="capture" placeholder="Park the thought here"></textarea>
-  </div>
-</div>
 
-<script>
-const HZ={H1:"#4c9aff",H2:"#f2994a",H3:"#9b51e0"};
-let BOARD=null, SEL=null, VIEW="project";
+    <script>
+        const HZ = { H1: "#4c9aff", H2: "#f2994a", H3: "#9b51e0" };
+        let BOARD = null, SEL = null, VIEW = "project";
 
-async function load(){
-  const r=await fetch("/api/board?stores=work");
-  BOARD=await r.json();
-  if(!SEL && BOARD.projects.length) SEL=BOARD.projects[0].id;
-  drawRail(); draw(); drawCandidates();
-}
+        async function load() {
+            const r = await fetch("/api/board?stores=work");
+            BOARD = await r.json();
+            if (!SEL && BOARD.projects.length) SEL = BOARD.projects[0].id;
+            drawRail(); draw(); drawCandidates();
+        }
 
-function proj(id){return BOARD.projects.find(p=>p.id===id);}
+        function proj(id) { return BOARD.projects.find(p => p.id === id); }
 
-function drawRail(){
-  document.getElementById("cnt").textContent=BOARD.projects.length;
-  document.getElementById("plist").innerHTML=BOARD.projects.map(p=>`
-    <div class="pitem${p.id===SEL?" on":""}" onclick="pick('${p.id}')">
+        function drawRail() {
+            document.getElementById("cnt").textContent = BOARD.projects.length;
+            document.getElementById("plist").innerHTML = BOARD.projects.map(p => `
+    <div class="pitem${p.id === SEL ? " on" : ""}" onclick="pick('${p.id}')">
       <div class="pname">${p.name}</div>
       <div class="pmeta">
-        ${p.horizon?`<span class="hz" style="background:${HZ[p.horizon]||"#555"}">${p.horizon}</span>`:""}
-        ${p.kind} · ${p.open_tasks} open${p.next_due?` · due ${p.next_due}`:""}
+        ${p.horizon ? `<span class="hz" style="background:${HZ[p.horizon] || "#555"}">${p.horizon}</span>` : ""}
+        ${p.kind} · ${p.open_tasks} open${p.next_due ? ` · due ${p.next_due}` : ""}
       </div>
       <div class="pmeta">${p.stalled
-        ?`<span class="chip" style="background:var(--stop)">no move today</span>`
-        :(p.next_move?`next: ${p.next_move.title}${p.next_move.effort_h?` (${p.next_move.effort_h}h)`:""}`:"")}
+                    ? `<span class="chip" style="background:var(--stop)">no move today</span>`
+                    : (p.next_move ? `next: ${p.next_move.title}${p.next_move.effort_h ? ` (${p.next_move.effort_h}h)` : ""}` : "")}
       </div>
       <div class="pscore">${p.score}</div>
     </div>`).join("");
 
-  const v=BOARD.vpn, c=BOARD.capacity;
-  document.getElementById("railfoot").innerHTML=
-    `<div><i class="dot" style="background:${v.tunnel?"var(--ok)":"var(--stop)"}"></i>${v.label}</div>
-     <div style="margin-top:5px"><i class="dot" style="background:${c.overcommitted?"var(--stop)":"var(--ok)"}"></i>
+            const v = BOARD.vpn, c = BOARD.capacity;
+            document.getElementById("railfoot").innerHTML =
+                `<div><i class="dot" style="background:${v.tunnel ? "var(--ok)" : "var(--stop)"}"></i>${v.label}</div>
+     <div style="margin-top:5px"><i class="dot" style="background:${c.overcommitted ? "var(--stop)" : "var(--ok)"}"></i>
      ${c.committed_h}h committed / ${c.available_h}h in ${c.window_days}d</div>`;
-  document.getElementById("stamp").textContent="Loaded "+BOARD.generated+" · read-only";
-}
+            document.getElementById("stamp").textContent = "Loaded " + BOARD.generated + " · read-only";
+        }
 
-function pick(id){SEL=id;drawRail();draw();}
+        function pick(id) { SEL = id; drawRail(); draw(); }
 
-function draw(){
-  const el=document.getElementById("view");
-  if(VIEW==="brief") return el.innerHTML=briefView();
-  if(VIEW==="triage") return el.innerHTML=triageView();
-  if(VIEW==="tools") return el.innerHTML=toolsView();
-  if(VIEW==="capacity") return el.innerHTML=capView();
-  el.innerHTML=projectView();
-}
+        function draw() {
+            const el = document.getElementById("view");
+            if (VIEW === "brief") return el.innerHTML = briefView();
+            if (VIEW === "triage") return el.innerHTML = triageView();
+            if (VIEW === "tools") return el.innerHTML = toolsView();
+            if (VIEW === "capacity") return el.innerHTML = capView();
+            if (VIEW === "chat") return el.innerHTML = chatView();
+            el.innerHTML = projectView();
+        }
 
-/* ---- tools: shared capabilities, not project members ----
-   A tool is declared once and referenced by id. Ordering is by dependant count
-   ascending, so the tools nothing depends on are the first thing you see. That
-   list is where unkilled work has been hiding: it never appeared on a project
-   board because it was never a project. */
-function toolsView(){
-  const T=BOARD.tools||[], esc=s=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
-  const orphan=T.filter(t=>!t.used_by.length&&t.status!=="retired");
-  const undocumented=T.filter(t=>!t.documented&&t.status!=="retired");
-  const missing=T.filter(t=>t.path&&!t.exists);
-  const und=BOARD.undeclared_tools||[];
+        /* ---- chat: the Copilot CLI, not a second assistant ----
+           HiveFrame does not implement an assistant. It shells out to `copilot`, which
+           already has tool access, an authenticated session and a permission model.
+           A chat box without tool access is a worse terminal, and rebuilding tool
+           access is weeks of work to duplicate something already installed.
 
-  const chip=(txt,col)=>`<span class="chip" style="background:${col}">${txt}</span>`;
-  const acc=a=>a==="write"?chip("write","var(--stop)")
-    :a==="read-write-local"?chip("local write","var(--warn)")
-    :chip("read-only","var(--ok)");
+           Two things are always on screen: what the CLI is allowed to do, and what
+           each turn cost. An assistant whose permissions and spend are invisible is
+           the thing this tool exists to argue against. */
 
-  const row=t=>`<tr>
+        let CHAT = null, TURNS = [];
+
+        /* Answers are model output rendered into the page, so they are escaped.
+           Trusting a generated string as HTML is how a helpful tool becomes an
+           injection surface. */
+        function esc(s) {
+            return String(s == null ? "" : s)
+                .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+
+        function chatView() {
+            if (!CHAT) { loadChat(); return `<h1>Chat</h1><p class="empty">Checking for the Copilot CLI...</p>`; }
+            if (!CHAT.cli.ok) {
+                return `<h1>Chat</h1>
+  <div class="card"><h2>Not available</h2>
+  <p class="why">${CHAT.cli.reason}</p>
+  <p class="hint">Chat runs through the GitHub Copilot CLI. Install it with
+  <code>npm i -g @github/copilot</code>, then reload.</p></div>`;
+            }
+            const spent = TURNS.reduce((a, t) => a + (t.credits || 0), 0);
+            return `<h1>Chat</h1>
+  <div class="card">
+    <h2>Ask</h2>
+    <textarea id="cprompt" rows="3" placeholder="Ask about the board, a project, or the files in this store. Enter to send, Shift+Enter for a new line."></textarea>
+    <div class="row" style="margin-top:8px">
+      <button id="csend">Send</button>
+      <button id="cnew">New conversation</button>
+      <span class="why" id="cstat">${CHAT.session ? "Resuming session " + CHAT.session.slice(0, 8) : "No session yet"}</span>
+    </div>
+  </div>
+
+  <div class="card" id="canswer" style="display:none"><h2>Answer</h2><div id="cbody"></div></div>
+
+  <div class="card">
+    <h2>What it may do</h2>
+    <p class="why">Model <b>${CHAT.model}</b>. Read verbs only: ${CHAT.allow.map(t => `<code>${t}</code>`).join(" ")}.
+    Write and network verbs are denied explicitly, and <code>--allow-all-tools</code> is never passed,
+    so anything not listed here stops and asks, which with nobody present is a refusal.</p>
+  </div>
+
+  <div class="card">
+    <h2>Turns and cost</h2>
+    ${TURNS.length ? `<p class="why">${TURNS.length} turn(s) in this store, ${spent.toFixed(2)} AI credits.</p>
+    <table><tr><th>When</th><th>Prompt</th><th>Sec</th><th>Credits</th></tr>
+    ${TURNS.slice().reverse().map(t => `<tr>
+      <td>${(t.at || "").slice(5, 16).replace("T", " ")}</td>
+      <td class="why">${esc(t.prompt).slice(0, 70)}</td>
+      <td>${t.seconds ?? ""}</td><td>${t.credits ?? ""}</td></tr>`).join("")}</table>`
+                    : `<p class="empty">No turns yet. Every turn spends credits, so they are logged here rather than inferred.</p>`}
+  </div>`;
+        }
+
+        async function loadChat() {
+            const r = await fetch("/api/chat/state?store=work");
+            CHAT = await r.json();
+            TURNS = CHAT.history || [];
+            if (VIEW === "chat") draw();
+        }
+
+        async function sendChat() {
+            const box = document.getElementById("cprompt");
+            const v = (box.value || "").trim();
+            if (!v) return;
+            const stat = document.getElementById("cstat");
+            const ans = document.getElementById("canswer");
+            const body = document.getElementById("cbody");
+            ans.style.display = "";
+            body.innerHTML = `<p class="empty">Thinking. The CLI runs real tools, so this is seconds, not instant.</p>`;
+            stat.textContent = "Running...";
+            const t0 = Date.now();
+            const r = await fetch("/api/chat", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: v, store: "work" })
+            });
+            const d = await r.json();
+            if (d.error) {
+                body.innerHTML = `<p class="why">${esc(d.error)}</p>`;
+                stat.textContent = "Failed";
+                return;
+            }
+            box.value = "";
+            body.innerHTML = `<pre style="white-space:pre-wrap;margin:0">${esc(d.answer)}</pre>`;
+            stat.textContent = `${d.seconds}s · ${d.credits ?? "?"} credits · session ${(d.session || "").slice(0, 8)}`;
+            TURNS.push(d);
+        }
+
+        /* ---- tools: shared capabilities, not project members ----
+           A tool is declared once and referenced by id. Ordering is by dependant count
+           ascending, so the tools nothing depends on are the first thing you see. That
+           list is where unkilled work has been hiding: it never appeared on a project
+           board because it was never a project. */
+        function toolsView() {
+            const T = BOARD.tools || [], esc = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+            const orphan = T.filter(t => !t.used_by.length && t.status !== "retired");
+            const undocumented = T.filter(t => !t.documented && t.status !== "retired");
+            const missing = T.filter(t => t.path && !t.exists);
+            const und = BOARD.undeclared_tools || [];
+
+            const chip = (txt, col) => `<span class="chip" style="background:${col}">${txt}</span>`;
+            const acc = a => a === "write" ? chip("write", "var(--stop)")
+                : a === "read-write-local" ? chip("local write", "var(--warn)")
+                    : chip("read-only", "var(--ok)");
+
+            const row = t => `<tr>
     <td><b>${esc(t.name)}</b>
-      <div class="why">${t.does?esc(t.does):'<span class="gap">No description. Nobody can hand this over.</span>'}</div>
-      ${t.note?`<div class="why">${esc(t.note)}</div>`:""}</td>
+      <div class="why">${t.does ? esc(t.does) : '<span class="gap">No description. Nobody can hand this over.</span>'}</div>
+      ${t.note ? `<div class="why">${esc(t.note)}</div>` : ""}</td>
     <td>${esc(t.where)}</td>
-    <td>${acc(t.access)}${t.status!=="active"?" "+chip(t.status,"var(--faint)"):""}
-        ${t.path&&!t.exists?" "+chip("path missing","var(--stop)"):""}</td>
+    <td>${acc(t.access)}${t.status !== "active" ? " " + chip(t.status, "var(--faint)") : ""}
+        ${t.path && !t.exists ? " " + chip("path missing", "var(--stop)") : ""}</td>
     <td>${t.used_by.length
-      ?t.used_by.map(p=>`<span class="lnk" onclick="pick('${p}')">${p}</span>`).join(", ")
-      :`<span class="why">nothing</span>`}</td>
-    <td>${t.used_by.length||t.status==="retired"?"":
-      `<button class="vb kill" onclick="retireTool('${t.id}')">Retire</button>`}</td>
+                    ? t.used_by.map(p => `<span class="lnk" onclick="pick('${p}')">${p}</span>`).join(", ")
+                    : `<span class="why">nothing</span>`}</td>
+    <td>${t.used_by.length || t.status === "retired" ? "" :
+                    `<button class="vb kill" onclick="retireTool('${t.id}')">Retire</button>`}</td>
   </tr>`;
 
-  return `
+            return `
   <h1>Tools</h1>
   <p class="lede">Shared capabilities. A tool is not owned by whatever needed it
      first, so projects reference it by id and the description lives in one place.</p>
@@ -282,20 +892,20 @@ function toolsView(){
     <div class="stat"><div class="k">Registered</div><div class="v">${T.length}</div>
       <div class="n">across this store</div></div>
     <div class="stat"><div class="k">Used by nothing</div>
-      <div class="v" style="color:${orphan.length?"var(--warn)":"var(--ok)"}">${orphan.length}</div>
+      <div class="v" style="color:${orphan.length ? "var(--warn)" : "var(--ok)"}">${orphan.length}</div>
       <div class="n">either dead or undeclared</div></div>
     <div class="stat"><div class="k">Undocumented</div>
-      <div class="v" style="color:${undocumented.length?"var(--warn)":"var(--ok)"}">${undocumented.length}</div>
+      <div class="v" style="color:${undocumented.length ? "var(--warn)" : "var(--ok)"}">${undocumented.length}</div>
       <div class="n">no one-line description</div></div>
     <div class="stat"><div class="k">Path missing</div>
-      <div class="v" style="color:${missing.length?"var(--stop)":"var(--ok)"}">${missing.length}</div>
+      <div class="v" style="color:${missing.length ? "var(--stop)" : "var(--ok)"}">${missing.length}</div>
       <div class="n">registered but not on disk</div></div>
   </div></div>
 
-  ${und.length?`<div class="card"><h2>Declared but not registered</h2>
+  ${und.length ? `<div class="card"><h2>Declared but not registered</h2>
     <p class="why">A project depends on these and nothing describes them. That is
        load-bearing and undocumented, which is worse than unused.</p>
-    <div>${und.map(i=>chip(i,"var(--stop)")).join(" ")}</div></div>`:""}
+    <div>${und.map(i => chip(i, "var(--stop)")).join(" ")}</div></div>` : ""}
 
   <div class="card"><h2>Registry, least depended on first</h2>
     <table>
@@ -305,34 +915,36 @@ function toolsView(){
     <p class="hint">Retiring is refused while a project still declares the tool.
        Remove the dependency first, and say why it is no longer needed there.</p>
   </div>`;
-}
+        }
 
-async function retireTool(id){
-  const why=prompt("Why retire "+id+"? The reason stays on the record.");
-  if(why===null) return;
-  const r=await fetch("/api/tool",{method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"retire",tool:id,reason:why,store:"work"})});
-  const d=await r.json();
-  if(!r.ok){alert(d.error||"refused");return;}
-  await load(); draw();
-}
+        async function retireTool(id) {
+            const why = prompt("Why retire " + id + "? The reason stays on the record.");
+            if (why === null) return;
+            const r = await fetch("/api/tool", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "retire", tool: id, reason: why, store: "work" })
+            });
+            const d = await r.json();
+            if (!r.ok) { alert(d.error || "refused"); return; }
+            await load(); draw();
+        }
 
-/* ---- triage: the view that removes things ----
-   Ordered worst first, because the top of a board looks after itself. Every
-   row forces one of four verdicts and none of them is "leave it". A reason is
-   required, since a kill with no reason returns in six weeks as a new idea. */
-function triageView(){
-  const live=BOARD.projects.filter(p=>p.status==="active"||p.status==="blocked");
-  const rest=BOARD.projects.filter(p=>!(p.status==="active"||p.status==="blocked"));
-  const order=[...live].reverse();
+        /* ---- triage: the view that removes things ----
+           Ordered worst first, because the top of a board looks after itself. Every
+           row forces one of four verdicts and none of them is "leave it". A reason is
+           required, since a kill with no reason returns in six weeks as a new idea. */
+        function triageView() {
+            const live = BOARD.projects.filter(p => p.status === "active" || p.status === "blocked");
+            const rest = BOARD.projects.filter(p => !(p.status === "active" || p.status === "blocked"));
+            const order = [...live].reverse();
 
-  const row=p=>`
+            const row = p => `
     <tr>
       <td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span>
-        <div class="why">${p.why.join("; ")||"no signals"}</div>
-        ${p.charter.kill_when?`<div class="why">Kill when: ${p.charter.kill_when}</div>`
-          :`<div class="why gap">No kill condition stated. Nothing here can ever fail.</div>`}</td>
+        <div class="why">${p.why.join("; ") || "no signals"}</div>
+        ${p.charter.kill_when ? `<div class="why">Kill when: ${p.charter.kill_when}</div>`
+                    : `<div class="why gap">No kill condition stated. Nothing here can ever fail.</div>`}</td>
       <td class="num">${p.score}</td>
       <td class="num">${p.open_tasks}</td>
       <td class="num">${p.open_effort_h}h</td>
@@ -347,7 +959,7 @@ function triageView(){
       </td>
     </tr>`;
 
-  return `
+            return `
   <h1>Triage</h1>
   <p class="lede">Worst first. Kill it, park it, close it, or keep it and say why.
      Leaving it is not one of the four.</p>
@@ -361,83 +973,85 @@ function triageView(){
        project's own file and appends to decisions.jsonl. Nothing else is written.</p>
   </div>
 
-  ${rest.length?`<div class="card"><h2>Already decided</h2>
+  ${rest.length ? `<div class="card"><h2>Already decided</h2>
     <table><tr><th>Project</th><th>Status</th><th>Open</th></tr>
-    ${rest.map(p=>`<tr><td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span></td>
+    ${rest.map(p => `<tr><td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span></td>
       <td>${p.status}</td><td class="num">${p.open_tasks}</td></tr>`).join("")}
-    </table></div>`:`<div class="card"><h2>Already decided</h2>
+    </table></div>`: `<div class="card"><h2>Already decided</h2>
     <p class="empty">Nothing has ever been removed from this board.</p></div>`}
 
   <div class="card"><h2>Decision log</h2><div id="dlog"></div></div>`;
-}
+        }
 
-async function verdict(id,status){
-  const box=document.getElementById("rsn-"+id);
-  const reason=(box&&box.value||"").trim();
-  if(!reason){box.focus();box.placeholder="A reason is required.";return;}
-  const r=await fetch("/api/verdict",{method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({project:id,status,reason,store:"work"})});
-  const d=await r.json();
-  if(!r.ok){alert(d.error||"refused");return;}
-  await load(); draw(); loadLog();
-}
+        async function verdict(id, status) {
+            const box = document.getElementById("rsn-" + id);
+            const reason = (box && box.value || "").trim();
+            if (!reason) { box.focus(); box.placeholder = "A reason is required."; return; }
+            const r = await fetch("/api/verdict", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ project: id, status, reason, store: "work" })
+            });
+            const d = await r.json();
+            if (!r.ok) { alert(d.error || "refused"); return; }
+            await load(); draw(); loadLog();
+        }
 
-async function loadLog(){
-  const el=document.getElementById("dlog");
-  if(!el) return;
-  const r=await fetch("/api/log?name=decisions.jsonl");
-  const rows=(await r.json()).rows||[];
-  el.innerHTML=rows.length?`<table>
+        async function loadLog() {
+            const el = document.getElementById("dlog");
+            if (!el) return;
+            const r = await fetch("/api/log?name=decisions.jsonl");
+            const rows = (await r.json()).rows || [];
+            el.innerHTML = rows.length ? `<table>
     <tr><th>When</th><th>Project</th><th>Change</th><th>Reason</th></tr>
-    ${rows.map(x=>`<tr><td class="num">${x.at.slice(0,16).replace("T"," ")}</td>
+    ${rows.map(x => `<tr><td class="num">${x.at.slice(0, 16).replace("T", " ")}</td>
       <td>${x.name}</td><td>${x.from} to ${x.to}</td>
       <td class="why">${x.reason}</td></tr>`).join("")}</table>`
-    :`<p class="empty">No decisions recorded yet.</p>`;
-}
+                : `<p class="empty">No decisions recorded yet.</p>`;
+        }
 
-function projectView(){
-  const p=proj(SEL);
-  if(!p) return `<p class="empty">No projects. Add a .toml file to the projects directory.</p>`;
-  const c=p.charter;
-  const esc=s=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+        function projectView() {
+            const p = proj(SEL);
+            if (!p) return `<p class="empty">No projects. Add a .toml file to the projects directory.</p>`;
+            const c = p.charter;
+            const esc = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
-  /* Charter fields are editable in place. The charter is the thing that stops
-     drift, so making it hard to correct guarantees it goes stale and stops
-     being believed. */
-  const crow=(k,label,v)=>`
+            /* Charter fields are editable in place. The charter is the thing that stops
+               drift, so making it hard to correct guarantees it goes stale and stops
+               being believed. */
+            const crow = (k, label, v) => `
     <div class="crow"><span class="ck">${label}</span>
       <span>${EDIT
-        ?`<textarea class="ed" data-charter="${k}">${esc(v)}</textarea>`
-        :(v?esc(v):'<span class="gap">not stated</span>')}</span></div>`;
+                    ? `<textarea class="ed" data-charter="${k}">${esc(v)}</textarea>`
+                    : (v ? esc(v) : '<span class="gap">not stated</span>')}</span></div>`;
 
-  const otherIds=BOARD.projects.filter(x=>x.id!==p.id).map(x=>x.id);
+            const otherIds = BOARD.projects.filter(x => x.id !== p.id).map(x => x.id);
 
-  return `
+            return `
   <h1>${p.name}</h1>
-  <p class="lede">${p.kind} · ${p.horizon||"no horizon"} · ${p.status} ·
-     score ${p.score} <span class="why">(${p.why.join("; ")||"no signals"})</span></p>
+  <p class="lede">${p.kind} · ${p.horizon || "no horizon"} · ${p.status} ·
+     score ${p.score} <span class="why">(${p.why.join("; ") || "no signals"})</span></p>
 
   <div class="card charter">
-    <h2>Charter${c.complete?"":' <span class="gap">&nbsp;incomplete</span>'}
+    <h2>Charter${c.complete ? "" : ' <span class="gap">&nbsp;incomplete</span>'}
       <span class="toolbar">
-        ${EDIT?`<button class="sm pri" onclick="saveCharter()">Save charter</button>
+        ${EDIT ? `<button class="sm pri" onclick="saveCharter()">Save charter</button>
                 <button class="sm" onclick="setEdit(false)">Cancel</button>`
-               :`<button class="sm" onclick="setEdit(true)">Edit</button>`}
+                    : `<button class="sm" onclick="setEdit(true)">Edit</button>`}
       </span></h2>
-    ${crow("problem","Problem",c.problem)}
-    ${crow("hypothesis","Hypothesis",c.hypothesis)}
-    ${crow("goal","Goal",c.goal)}
-    ${crow("kill_when","Kill when",c.kill_when)}
-    ${crow("done_when","Done when",c.done_when)}
+    ${crow("problem", "Problem", c.problem)}
+    ${crow("hypothesis", "Hypothesis", c.hypothesis)}
+    ${crow("goal", "Goal", c.goal)}
+    ${crow("kill_when", "Kill when", c.kill_when)}
+    ${crow("done_when", "Done when", c.done_when)}
     ${EDIT
-      ?`<div class="crow"><span class="ck">Constraints</span>
+                    ? `<div class="crow"><span class="ck">Constraints</span>
           <span><textarea class="ed" data-charter="constraints"
             placeholder="One per line">${esc(c.constraints.join("\n"))}</textarea></span></div>`
-      :(c.constraints.length?`<div class="crow"><span class="ck">Constraints</span>
-          <span>${esc(c.constraints.join(", "))}</span></div>`:"")}
-    ${EDIT?`<p class="hint">Saving rewrites the project file from the model and
-       keeps a .bak. Hand-written TOML comments are lost, so keep notes in fields.</p>`:""}
+                    : (c.constraints.length ? `<div class="crow"><span class="ck">Constraints</span>
+          <span>${esc(c.constraints.join(", "))}</span></div>` : "")}
+    ${EDIT ? `<p class="hint">Saving rewrites the project file from the model and
+       keeps a .bak. Hand-written TOML comments are lost, so keep notes in fields.</p>`: ""}
   </div>
 
   <div class="card">
@@ -457,30 +1071,29 @@ function projectView(){
         <button class="sm" onclick="toggleAdd()">Cancel</button></div>
     </div>
 
-    ${p.tasks.length?`<table>
+    ${p.tasks.length ? `<table>
       <tr><th>Task</th><th>Due</th><th>Left</th><th>Effort</th><th>Flags</th><th>Status</th><th></th></tr>
-      ${p.tasks.map(t=>`<tr>
-        <td>${esc(t.title)}${t.blocked_by.length?` <span class="chip" style="background:var(--stop)">waits on ${t.blocked_by.join(", ")}</span>`:""}
-          ${t.note?`<div class="why">${esc(t.note)}</div>`:""}</td>
-        <td class="num">${t.due||"<span class='why'>none</span>"}</td>
-        <td class="num ${t.days_left!==null&&t.days_left<0?"missing":""}">${
-          t.days_left===null?"":t.days_left+"d"}</td>
-        <td class="num">${t.effort_h?t.effort_h+"h":""}</td>
-        <td>${t.urgent?'<span class="chip" style="background:var(--stop)">urgent</span>':""}
-            ${t.important?'<span class="chip" style="background:var(--warn)">important</span>':""}</td>
-        <td>${t.status==="open"||t.status==="doing"
-          ?`<select class="ed" style="width:auto;padding:3px 6px"
+      ${p.tasks.map(t => `<tr>
+        <td>${esc(t.title)}${t.blocked_by.length ? ` <span class="chip" style="background:var(--stop)">waits on ${t.blocked_by.join(", ")}</span>` : ""}
+          ${t.note ? `<div class="why">${esc(t.note)}</div>` : ""}</td>
+        <td class="num">${t.due || "<span class='why'>none</span>"}</td>
+        <td class="num ${t.days_left !== null && t.days_left < 0 ? "missing" : ""}">${t.days_left === null ? "" : t.days_left + "d"}</td>
+        <td class="num">${t.effort_h ? t.effort_h + "h" : ""}</td>
+        <td>${t.urgent ? '<span class="chip" style="background:var(--stop)">urgent</span>' : ""}
+            ${t.important ? '<span class="chip" style="background:var(--warn)">important</span>' : ""}</td>
+        <td>${t.status === "open" || t.status === "doing"
+                            ? `<select class="ed" style="width:auto;padding:3px 6px"
               onchange="taskField('${t.id}','status',this.value)">
-              ${["open","doing","done"].map(s=>`<option${t.status===s?" selected":""}>${s}</option>`).join("")}
+              ${["open", "doing", "done"].map(s => `<option${t.status === s ? " selected" : ""}>${s}</option>`).join("")}
             </select>`
-          :esc(t.status)}</td>
-        <td>${t.status==="open"||t.status==="doing"
-          ?`<button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>`:""}</td>
+                            : esc(t.status)}</td>
+        <td>${t.status === "open" || t.status === "doing"
+                            ? `<button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>` : ""}</td>
       </tr>`).join("")}
     </table>
     <p class="hint">Dropping asks for a reason and keeps the task. Deleting it would
        take its estimate with it and quietly improve the capacity number.</p>`
-    :`<p class="empty">No tasks. A project with no next move is a project that is not moving.</p>`}
+                    : `<p class="empty">No tasks. A project with no next move is a project that is not moving.</p>`}
   </div>
 
   <div class="card">
@@ -497,16 +1110,16 @@ function projectView(){
         <button class="sm" onclick="toggleArt()">Cancel</button></div>
     </div>
 
-    ${p.artifacts.length?`<table>
+    ${p.artifacts.length ? `<table>
       <tr><th>Artifact</th><th>Kind</th><th>Where</th></tr>
-      ${p.artifacts.map(a=>`<tr>
-        <td>${esc(a.label)}${a.exists||!a.path?"":' <span class="chip" style="background:var(--stop)">missing</span>'}</td>
+      ${p.artifacts.map(a => `<tr>
+        <td>${esc(a.label)}${a.exists || !a.path ? "" : ' <span class="chip" style="background:var(--stop)">missing</span>'}</td>
         <td>${esc(a.kind)}</td>
-        <td>${a.path?`<span class="lnk" onclick="reveal('${a.path.replace(/'/g,"\\'")}')">Reveal in Finder</span>
-              <div class="mono">${esc(a.path)}</div>`:""}
-            ${a.url?`<a class="lnk" href="${a.url}" target="_blank">Open published</a>`:""}</td>
+        <td>${a.path ? `<span class="lnk" onclick="reveal('${a.path.replace(/'/g, "\\'")}')">Reveal in Finder</span>
+              <div class="mono">${esc(a.path)}</div>` : ""}
+            ${a.url ? `<a class="lnk" href="${a.url}" target="_blank">Open published</a>` : ""}</td>
       </tr>`).join("")}
-    </table>`:`<p class="empty">No artifacts registered.</p>`}
+    </table>`: `<p class="empty">No artifacts registered.</p>`}
   </div>
 
   <div class="card">
@@ -516,11 +1129,11 @@ function projectView(){
     <div id="relbox" style="display:none;margin-bottom:14px">
       <div class="grid2">
         <select class="ed" id="nr-to">
-          ${otherIds.map(i=>`<option value="${i}">${i}</option>`).join("")}
+          ${otherIds.map(i => `<option value="${i}">${i}</option>`).join("")}
         </select>
         <select class="ed" id="nr-type">
-          ${["blocks","blocked_by","feeds","governs","governed_by","hosts","informs"]
-            .map(t=>`<option>${t}</option>`).join("")}
+          ${["blocks", "blocked_by", "feeds", "governs", "governed_by", "hosts", "informs"]
+                    .map(t => `<option>${t}</option>`).join("")}
         </select>
       </div>
       <input class="ed" id="nr-note" placeholder="Why. A link with no reason cannot be judged later." style="margin-top:7px">
@@ -528,25 +1141,25 @@ function projectView(){
         <button class="sm" onclick="toggleRel()">Cancel</button></div>
     </div>
 
-    ${p.relations.length?`<table>
+    ${p.relations.length ? `<table>
       <tr><th>To</th><th>Type</th><th>Status</th><th>Why</th><th></th></tr>
-      ${p.relations.map(r=>`<tr>
+      ${p.relations.map(r => `<tr>
         <td><span class="lnk" onclick="pick('${r.to}')">${r.to}</span></td>
         <td>${esc(r.type)}</td>
-        <td>${r.status==="confirmed"
-              ?'<span class="chip" style="background:var(--ok)">confirmed</span>'
-              :r.status==="rejected"
-              ?'<span class="chip" style="background:var(--faint)">rejected</span>'
-              :'<span class="chip" style="background:var(--info)">suggested</span>'}</td>
+        <td>${r.status === "confirmed"
+                            ? '<span class="chip" style="background:var(--ok)">confirmed</span>'
+                            : r.status === "rejected"
+                                ? '<span class="chip" style="background:var(--faint)">rejected</span>'
+                                : '<span class="chip" style="background:var(--info)">suggested</span>'}</td>
         <td class="why">${esc(r.note)}</td>
-        <td>${r.status==="suggested"?`
+        <td>${r.status === "suggested" ? `
           <button class="vb" onclick="relVerdict('${r.to}','confirmed')">Confirm</button>
-          <button class="vb" onclick="relVerdict('${r.to}','rejected')">Reject</button>`:""}</td>
+          <button class="vb" onclick="relVerdict('${r.to}','rejected')">Reject</button>` : ""}</td>
       </tr>`).join("")}
     </table>
     <p class="hint">A suggested relation affects nothing until confirmed. Rejected ones
        stay on the record, so the same suggestion does not arrive next month looking new.</p>`
-    :`<p class="empty">No relations recorded. Nothing is implicitly connected.</p>`}
+                    : `<p class="empty">No relations recorded. Nothing is implicitly connected.</p>`}
   </div>
 
   <div class="card">
@@ -555,129 +1168,145 @@ function projectView(){
 
     <div id="usesbox" style="display:none;margin-bottom:14px">
       <div class="grid2">
-        ${(BOARD.tools||[]).map(t=>`<label class="fl">
-          <input type="checkbox" class="use-ck" value="${t.id}"${p.uses.includes(t.id)?" checked":""}>
+        ${(BOARD.tools || []).map(t => `<label class="fl">
+          <input type="checkbox" class="use-ck" value="${t.id}"${p.uses.includes(t.id) ? " checked" : ""}>
           ${t.id}</label>`).join("")}
       </div>
       <div class="vrow"><button class="sm pri" onclick="saveUses()">Save</button>
         <button class="sm" onclick="toggleUses()">Cancel</button></div>
     </div>
 
-    ${p.uses.length?`<table>
+    ${p.uses.length ? `<table>
       <tr><th>Tool</th><th>What it does</th><th>Where</th></tr>
-      ${p.uses.map(id=>{const t=(BOARD.tools||[]).find(x=>x.id===id);
-        return `<tr><td>${id}</td>
-          <td class="why">${t?esc(t.does)||"<span class='gap'>undescribed</span>"
-            :"<span class='gap'>not in the registry</span>"}</td>
-          <td class="why">${t?esc(t.where):""}</td></tr>`;}).join("")}
+      ${p.uses.map(id => {
+                        const t = (BOARD.tools || []).find(x => x.id === id);
+                        return `<tr><td>${id}</td>
+          <td class="why">${t ? esc(t.does) || "<span class='gap'>undescribed</span>"
+                                : "<span class='gap'>not in the registry</span>"}</td>
+          <td class="why">${t ? esc(t.where) : ""}</td></tr>`;
+                    }).join("")}
     </table>
     <p class="hint">Tools are referenced, not owned. They are used by this project
        and are not limited to it.</p>`
-    :`<p class="empty">No declared tool dependencies.</p>`}
+                    : `<p class="empty">No declared tool dependencies.</p>`}
   </div>
 
-  <div class="card"><h2>Source</h2><div class="mono">${p.source_file||""}</div></div>`;
-}
+  <div class="card"><h2>Source</h2><div class="mono">${p.source_file || ""}</div></div>`;
+        }
 
-function toggleUses(){const b=document.getElementById("usesbox");
-  b.style.display=b.style.display==="none"?"block":"none";}
-async function saveUses(){
-  const ids=[...document.querySelectorAll(".use-ck")].filter(c=>c.checked).map(c=>c.value);
-  await api({action:"uses",fields:{uses:ids}});
-}
+        function toggleUses() {
+            const b = document.getElementById("usesbox");
+            b.style.display = b.style.display === "none" ? "block" : "none";
+        }
+        async function saveUses() {
+            const ids = [...document.querySelectorAll(".use-ck")].filter(c => c.checked).map(c => c.value);
+            await api({ action: "uses", fields: { uses: ids } });
+        }
 
-/* ---- edit plumbing ---- */
-let EDIT=false;
-function setEdit(on){EDIT=on;draw();}
-function toggleAdd(){const b=document.getElementById("addbox");
-  b.style.display=b.style.display==="none"?"block":"none";
-  if(b.style.display==="block") document.getElementById("nt-title").focus();}
-function toggleArt(){const b=document.getElementById("artbox");
-  b.style.display=b.style.display==="none"?"block":"none";}
-function toggleRel(){const b=document.getElementById("relbox");
-  b.style.display=b.style.display==="none"?"block":"none";}
+        /* ---- edit plumbing ---- */
+        let EDIT = false;
+        function setEdit(on) { EDIT = on; draw(); }
+        function toggleAdd() {
+            const b = document.getElementById("addbox");
+            b.style.display = b.style.display === "none" ? "block" : "none";
+            if (b.style.display === "block") document.getElementById("nt-title").focus();
+        }
+        function toggleArt() {
+            const b = document.getElementById("artbox");
+            b.style.display = b.style.display === "none" ? "block" : "none";
+        }
+        function toggleRel() {
+            const b = document.getElementById("relbox");
+            b.style.display = b.style.display === "none" ? "block" : "none";
+        }
 
-async function api(body){
-  const r=await fetch("/api/edit",{method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(Object.assign({store:"work",project:SEL},body))});
-  const d=await r.json();
-  if(!r.ok){alert(d.error||"refused");return false;}
-  await load(); draw();
-  return true;
-}
+        async function api(body) {
+            const r = await fetch("/api/edit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(Object.assign({ store: "work", project: SEL }, body))
+            });
+            const d = await r.json();
+            if (!r.ok) { alert(d.error || "refused"); return false; }
+            await load(); draw();
+            return true;
+        }
 
-async function saveCharter(){
-  const f={};
-  document.querySelectorAll("[data-charter]").forEach(el=>f[el.dataset.charter]=el.value);
-  EDIT=false;
-  await api({action:"charter",fields:f});
-}
-async function addTask(){
-  const v=id=>document.getElementById(id).value;
-  const ck=id=>document.getElementById(id).checked;
-  await api({action:"task.add",fields:{title:v("nt-title"),due:v("nt-due"),
-    effort_h:v("nt-effort"),urgent:ck("nt-urgent"),important:ck("nt-important"),
-    note:v("nt-note")}});
-}
-async function taskField(id,k,v){await api({action:"task.edit",task:id,fields:{[k]:v}});}
-async function dropTask(id){
-  const why=prompt("Why is this task dropped? It stays on the record with the reason.");
-  if(why===null) return;
-  await api({action:"task.drop",task:id,reason:why});
-}
-async function addArtifact(){
-  const v=id=>document.getElementById(id).value;
-  await api({action:"artifact.add",fields:{label:v("na-label"),path:v("na-path"),kind:v("na-kind")}});
-}
-async function addRelation(){
-  const v=id=>document.getElementById(id).value;
-  await api({action:"relation.add",to:v("nr-to"),type:v("nr-type"),note:v("nr-note")});
-}
-async function relVerdict(to,verdict){await api({action:"relation.verdict",to,verdict});}
+        async function saveCharter() {
+            const f = {};
+            document.querySelectorAll("[data-charter]").forEach(el => f[el.dataset.charter] = el.value);
+            EDIT = false;
+            await api({ action: "charter", fields: f });
+        }
+        async function addTask() {
+            const v = id => document.getElementById(id).value;
+            const ck = id => document.getElementById(id).checked;
+            await api({
+                action: "task.add", fields: {
+                    title: v("nt-title"), due: v("nt-due"),
+                    effort_h: v("nt-effort"), urgent: ck("nt-urgent"), important: ck("nt-important"),
+                    note: v("nt-note")
+                }
+            });
+        }
+        async function taskField(id, k, v) { await api({ action: "task.edit", task: id, fields: { [k]: v } }); }
+        async function dropTask(id) {
+            const why = prompt("Why is this task dropped? It stays on the record with the reason.");
+            if (why === null) return;
+            await api({ action: "task.drop", task: id, reason: why });
+        }
+        async function addArtifact() {
+            const v = id => document.getElementById(id).value;
+            await api({ action: "artifact.add", fields: { label: v("na-label"), path: v("na-path"), kind: v("na-kind") } });
+        }
+        async function addRelation() {
+            const v = id => document.getElementById(id).value;
+            await api({ action: "relation.add", to: v("nr-to"), type: v("nr-type"), note: v("nr-note") });
+        }
+        async function relVerdict(to, verdict) { await api({ action: "relation.verdict", to, verdict }); }
 
-function briefView(){
-  const top=BOARD.projects.slice(0,5), bottom=BOARD.projects.slice(-5).reverse();
-  const c=BOARD.capacity;
-  const flags=[];
-  c.at_risk.forEach(r=>flags.push(["var(--stop)",
-    `<b>${r.title}</b> needs ${r.effort_h}h with ${r.hours_available}h available before ${r.due}`]));
-  if(c.overcommitted) flags.push(["var(--stop)",
-    `Portfolio overcommitted by ${c.overcommitted_by_h}h in the next ${c.window_days} days. Something has to give.`]);
-  BOARD.projects.forEach(p=>{
-    p.relations.filter(r=>r.status==="suggested").forEach(r=>
-      flags.push(["var(--info)",`<b>${p.name}</b> has a suggested relation to ${r.to} awaiting a verdict`]));
-    if(!p.charter.complete&&p.status==="active")
-      flags.push(["var(--warn)",`<b>${p.name}</b> charter missing: ${p.charter.missing.join(", ")}`]);
-  });
+        function briefView() {
+            const top = BOARD.projects.slice(0, 5), bottom = BOARD.projects.slice(-5).reverse();
+            const c = BOARD.capacity;
+            const flags = [];
+            c.at_risk.forEach(r => flags.push(["var(--stop)",
+                `<b>${r.title}</b> needs ${r.effort_h}h with ${r.hours_available}h available before ${r.due}`]));
+            if (c.overcommitted) flags.push(["var(--stop)",
+                `Portfolio overcommitted by ${c.overcommitted_by_h}h in the next ${c.window_days} days. Something has to give.`]);
+            BOARD.projects.forEach(p => {
+                p.relations.filter(r => r.status === "suggested").forEach(r =>
+                    flags.push(["var(--info)", `<b>${p.name}</b> has a suggested relation to ${r.to} awaiting a verdict`]));
+                if (!p.charter.complete && p.status === "active")
+                    flags.push(["var(--warn)", `<b>${p.name}</b> charter missing: ${p.charter.missing.join(", ")}`]);
+            });
 
-  return `
+            return `
   <h1>Brief</h1>
   <p class="lede">Top five and bottom five, ranked. One decision each, then stop.</p>
 
   <div class="card"><h2>Flags</h2>
-    ${flags.length?flags.map(([col,txt])=>
-      `<div class="flag"><i class="b" style="background:${col}"></i><span>${txt}</span></div>`).join("")
-     :`<p class="empty">Nothing flagged.</p>`}</div>
+    ${flags.length ? flags.map(([col, txt]) =>
+                `<div class="flag"><i class="b" style="background:${col}"></i><span>${txt}</span></div>`).join("")
+                    : `<p class="empty">Nothing flagged.</p>`}</div>
 
   <div class="card"><h2>Top 5, do these</h2>
     <table><tr><th>Project</th><th>Score</th><th>Why it ranks</th></tr>
-    ${top.map(p=>`<tr><td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span></td>
-      <td class="num">${p.score}</td><td class="why">${p.why.join("; ")||"no signals"}</td></tr>`).join("")}
+    ${top.map(p => `<tr><td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span></td>
+      <td class="num">${p.score}</td><td class="why">${p.why.join("; ") || "no signals"}</td></tr>`).join("")}
     </table></div>
 
   <div class="card"><h2>Bottom 5, decide these</h2>
     <table><tr><th>Project</th><th>Score</th><th>Why it sank</th></tr>
-    ${bottom.map(p=>`<tr><td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span></td>
-      <td class="num">${p.score}</td><td class="why">${p.why.join("; ")||"no signals"}</td></tr>`).join("")}
+    ${bottom.map(p => `<tr><td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span></td>
+      <td class="num">${p.score}</td><td class="why">${p.why.join("; ") || "no signals"}</td></tr>`).join("")}
     </table>
     <p class="why" style="margin:10px 0 0">Kill it, park it with a reason, or set a date. Leaving it is not one of the three.</p>
   </div>`;
-}
+        }
 
-function capView(){
-  const c=BOARD.capacity;
-  return `
+        function capView() {
+            const c = BOARD.capacity;
+            return `
   <h1>Capacity</h1>
   <p class="lede">Fixed weekly budget against committed effort. Estimates start wrong;
      logged focus sessions correct them.</p>
@@ -689,92 +1318,118 @@ function capView(){
     <div class="stat"><div class="k">Undated</div><div class="v">${c.undated_h}h</div>
       <div class="n">no due date, so invisible to the projection</div></div>
     <div class="stat"><div class="k">Overcommitted</div>
-      <div class="v" style="color:${c.overcommitted?"var(--stop)":"var(--ok)"}">${
-        c.overcommitted?c.overcommitted_by_h+"h":"no"}</div>
-      <div class="n">${c.overcommitted?"something must be cut":"fits, on current estimates"}</div></div>
+      <div class="v" style="color:${c.overcommitted ? "var(--stop)" : "var(--ok)"}">${c.overcommitted ? c.overcommitted_by_h + "h" : "no"}</div>
+      <div class="n">${c.overcommitted ? "something must be cut" : "fits, on current estimates"}</div></div>
   </div></div>
   <div class="card"><h2>At risk</h2>
-    ${c.at_risk.length?`<table>
+    ${c.at_risk.length ? `<table>
       <tr><th>Task</th><th>Project</th><th>Due</th><th>Left</th><th>Needs</th><th>Has</th></tr>
-      ${c.at_risk.map(r=>`<tr><td>${r.title}</td>
+      ${c.at_risk.map(r => `<tr><td>${r.title}</td>
         <td><span class="lnk" onclick="pick('${r.project}')">${r.project_name}</span></td>
         <td class="num">${r.due}</td><td class="num">${r.days_left}d</td>
         <td class="num">${r.effort_h}h</td>
         <td class="num missing">${r.hours_available}h</td></tr>`).join("")}
-      </table>`:`<p class="empty">Nothing at risk on current estimates.</p>`}
+      </table>`: `<p class="empty">Nothing at risk on current estimates.</p>`}
   </div>`;
-}
+        }
 
-function reveal(p){fetch("/api/open?path="+encodeURIComponent(p));}
+        function reveal(p) { fetch("/api/open?path=" + encodeURIComponent(p)); }
 
-/* ---- focus timer: picking is part of the tool ---- */
-let LEN=25*60, left=LEN, tick=null, task=null;
+        /* ---- focus timer: picking is part of the tool ---- */
+        let LEN = 25 * 60, left = LEN, tick = null, task = null;
 
-function drawCandidates(){
-  const out=[];
-  BOARD.projects.slice(0,3).forEach(p=>{
-    /* Never offer a task that is waiting on a sibling. A candidate you cannot
-       start is worse than no candidate: it costs a decision and returns nothing. */
-    const openIds=new Set(p.tasks.filter(x=>x.status==="open"||x.status==="doing").map(x=>x.id));
-    const t=p.tasks.find(x=>(x.status==="open"||x.status==="doing")
-      && !(x.blocked_by||[]).some(d=>openIds.has(d)));
-    if(t) out.push({p,t});
-  });
-  document.getElementById("cands").innerHTML=out.length?out.map((c,i)=>`
+        function drawCandidates() {
+            const out = [];
+            BOARD.projects.slice(0, 3).forEach(p => {
+                /* Never offer a task that is waiting on a sibling. A candidate you cannot
+                   start is worse than no candidate: it costs a decision and returns nothing. */
+                const openIds = new Set(p.tasks.filter(x => x.status === "open" || x.status === "doing").map(x => x.id));
+                const t = p.tasks.find(x => (x.status === "open" || x.status === "doing")
+                    && !(x.blocked_by || []).some(d => openIds.has(d)));
+                if (t) out.push({ p, t });
+            });
+            document.getElementById("cands").innerHTML = out.length ? out.map((c, i) => `
     <div class="cand" onclick="setTask(${i})">
       <div class="t">${c.t.title}</div>
-      <div class="r">${c.p.name} · ${c.p.why[0]||"ranked highest"}</div>
-    </div>`).join(""):`<div class="why">No open tasks to offer.</div>`;
-  window._CANDS=out;
-}
-function setTask(i){
-  const c=window._CANDS[i]; task=c;
-  document.getElementById("ctx").textContent=c.t.title+" · "+c.p.name;
-  if(c.p.id!==SEL) pick(c.p.id);
-}
-function fmt(s){return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");}
-function paint(){document.getElementById("clock").textContent=fmt(left);}
-document.getElementById("go").onclick=()=>{
-  const b=document.getElementById("go");
-  if(tick){clearInterval(tick);tick=null;b.textContent="Resume";return;}
-  b.textContent="Pause";
-  tick=setInterval(()=>{
-    left--; paint();
-    if(left<=0){clearInterval(tick);tick=null;left=LEN;paint();
-      b.textContent="Start";document.getElementById("ctx").textContent="Block done.";}
-  },1000);
-};
-document.getElementById("reset").onclick=()=>{
-  if(tick)clearInterval(tick); tick=null; left=LEN; paint();
-  document.getElementById("go").textContent="Start";
-};
-document.getElementById("fold").onclick=()=>{
-  const f=document.getElementById("focus");
-  f.classList.toggle("collapsed");
-  document.getElementById("fold").textContent=f.classList.contains("collapsed")?"+":"-";
-};
-document.getElementById("capture").addEventListener("keydown",async e=>{
-  if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();
-    const v=e.target.value.trim(); if(!v)return;
-    /* Persist it. A capture box that discards what you typed teaches you not
-       to use it, and then the thought goes back into working memory. */
-    const r=await fetch("/api/capture",{method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({text:v,store:"work",
-        project:task?task.p.id:"",task:task?task.t.id:""})});
-    if(!r.ok){e.target.placeholder="Not saved. Try again.";return;}
-    e.target.value=""; e.target.placeholder="Parked in inbox.jsonl. Keep going.";
-    setTimeout(()=>e.target.placeholder="Park the thought here",2500);
-  }
-});
+      <div class="r">${c.p.name} · ${c.p.why[0] || "ranked highest"}</div>
+    </div>`).join("") : `<div class="why">No open tasks to offer.</div>`;
+            window._CANDS = out;
+        }
+        function setTask(i) {
+            const c = window._CANDS[i]; task = c;
+            document.getElementById("ctx").textContent = c.t.title + " · " + c.p.name;
+            if (c.p.id !== SEL) pick(c.p.id);
+        }
+        function fmt(s) { return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); }
+        function paint() { document.getElementById("clock").textContent = fmt(left); }
+        document.getElementById("go").onclick = () => {
+            const b = document.getElementById("go");
+            if (tick) { clearInterval(tick); tick = null; b.textContent = "Resume"; return; }
+            b.textContent = "Pause";
+            tick = setInterval(() => {
+                left--; paint();
+                if (left <= 0) {
+                    clearInterval(tick); tick = null; left = LEN; paint();
+                    b.textContent = "Start"; document.getElementById("ctx").textContent = "Block done.";
+                }
+            }, 1000);
+        };
+        document.getElementById("reset").onclick = () => {
+            if (tick) clearInterval(tick); tick = null; left = LEN; paint();
+            document.getElementById("go").textContent = "Start";
+        };
+        document.getElementById("fold").onclick = () => {
+            const f = document.getElementById("focus");
+            f.classList.toggle("collapsed");
+            document.getElementById("fold").textContent = f.classList.contains("collapsed") ? "+" : "-";
+        };
+        document.getElementById("capture").addEventListener("keydown", async e => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                const v = e.target.value.trim(); if (!v) return;
+                /* Persist it. A capture box that discards what you typed teaches you not
+                   to use it, and then the thought goes back into working memory. */
+                const r = await fetch("/api/capture", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        text: v, store: "work",
+                        project: task ? task.p.id : "", task: task ? task.t.id : ""
+                    })
+                });
+                if (!r.ok) { e.target.placeholder = "Not saved. Try again."; return; }
+                e.target.value = ""; e.target.placeholder = "Parked in inbox.jsonl. Keep going.";
+                setTimeout(() => e.target.placeholder = "Park the thought here", 2500);
+            }
+        });
 
-document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));
-  b.classList.add("on"); VIEW=b.dataset.v; draw();
-  if(VIEW==="triage") loadLog();
-});
+        document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+            document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+            b.classList.add("on"); VIEW = b.dataset.v; draw();
+            if (VIEW === "triage") loadLog();
+            if (VIEW === "chat") wireChat();
+        });
 
-paint(); load();
-</script>
+        /* Chat controls are bound after each render because the view is
+           re-rendered from a string, which discards the previous listeners. */
+        function wireChat() {
+            const send = document.getElementById("csend");
+            if (!send) return;
+            send.onclick = sendChat;
+            document.getElementById("cnew").onclick = async () => {
+                await fetch("/api/chat", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ reset: true, store: "work" })
+                });
+                CHAT.session = ""; draw(); wireChat();
+            };
+            document.getElementById("cprompt").addEventListener("keydown", e => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+            });
+        }
+
+        paint(); load();
+    </script>
 </body>
+
 </html>
