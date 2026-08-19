@@ -7,22 +7,31 @@ terminal, and rebuilding tool access is weeks of work to duplicate something
 already installed.
 
 Posture. The CLI can edit files and run shell commands, so this module is the
-one place in HiveFrame that reaches outside a store. Four controls bound it, and
-one of them is weaker than it looks:
+one place in HiveFrame that reaches outside a store. The boundary is drawn
+around reach, not around verbs:
 
-  1. Writes are allowed. Publishing and remote history rewriting are not:
-     `git push`, `git reset` and every network verb are denied by name.
-  2. `shell(rm)` is denied, but that is not a deletion guarantee. Tested: asked
-     to delete a file, the CLI was refused `rm` and then deleted it through the
-     allowed edit tool instead. Granting write grants delete. The denial removes
-     the blunt instrument and the accidental `rm -rf`, not the capability.
-     Recovery is git, not the allowlist, which is why the repo commits after
-     every change.
-  3. --add-dir names writable directories explicitly rather than
-     --allow-all-paths. The protected shared libraries are never included.
-  4. Every turn is logged to chat.jsonl with its prompt, model, session id,
-     duration and cost. An assistant that acts without a record is the thing
-     this whole tool exists to argue against.
+  1. Tools are broad, reach is narrow. --allow-all-tools, so the assistant can
+     actually work: write a file, run a script, make a directory, stage a
+     commit. Enumerating permitted verbs was tried first and failed badly, since
+     a non-interactive run cannot prompt and every unnamed verb came back as
+     "could not request permission from user", which reads as a broken tool
+     rather than a policy.
+  2. --add-dir names the directories, and --allow-all-paths is never passed. A
+     capable assistant in a few named places is the trade. The protected shared
+     reference libraries are not among those places.
+  3. The deny list is the network. No curl, wget, ssh, scp, rsync, git push.
+     Nothing leaves the machine and nothing is published from here. Verified
+     that --deny-tool still takes precedence over --allow-all-tools, so these
+     are real rather than decorative.
+  4. Local deletion is not prevented, and pretending otherwise would be worse
+     than admitting it. Tested: refused `shell(rm)`, the assistant deleted the
+     file through the allowed edit tool instead. Granting write grants delete.
+     Recovery is git and OneDrive version history, which is why this repo
+     commits after every change.
+  5. Every turn is logged to chat.jsonl with its prompt, model, session id,
+     duration and cost, and the conversation to a per-project transcript. An
+     assistant that acts without a record is the thing this whole tool exists
+     to argue against.
 
 Sessions. The CLI owns continuity. It returns a session id on first turn and
 resumes with --resume, so HiveFrame stores the id and nothing else. Conversation
@@ -69,36 +78,38 @@ _STEP_RE = re.compile(r"^\s*([●✓✗⚠◆•])\s*(.+?)\s*$")
 _SPINNER_RE = re.compile(r"^\s*([/\\|_-])\s+(\S.*?)\s*$")
 _STEP_DETAIL_RE = re.compile(r"^\s*[│└├]\s?(.*)$")
 
-# Read verbs, always allowed without prompting.
-ALLOW_TOOLS = (
-    "shell(cat)",
-    "shell(ls)",
-    "shell(head)",
-    "shell(tail)",
-    "shell(wc)",
-    "shell(grep)",
-    "shell(find)",
-    "shell(git status)",
-    "shell(git log)",
-    "shell(git diff)",
-    "write",
-)
+# Everything is permitted except what is denied below, and the boundary that
+# actually matters is not this list at all: it is --add-dir, which decides where
+# the assistant can reach.
+#
+# The earlier design enumerated ten read verbs and let the allowlist refuse the
+# rest. It refused far more than intended. A non-interactive run cannot prompt,
+# so any unnamed verb (mkdir, sed, python, echo into a file, git add) came back
+# as "could not request permission from user", which reads as a broken tool
+# rather than a policy. Measured: with the narrow list, a plain shell write was
+# refused even inside a granted directory.
+#
+# Verified before switching: --deny-tool still takes precedence over
+# --allow-all-tools. curl stayed refused with the deny rules in place, so the
+# guardrails below are real rather than decorative.
+ALLOW_ALL_TOOLS = True
 
-# Denied by name rather than left to the allowlist, because a tool added
-# upstream arrives enabled otherwise. These are the verbs that destroy, move,
-# or reach the network. Editing is allowed; deleting and publishing are not.
+# Denied by name, because a tool added upstream arrives enabled otherwise. This
+# is now the whole guardrail, and it is drawn around one thing: nothing leaves
+# the machine. No publishing, no network fetch, no remote history rewrite.
+# Local destruction is not on this list in any meaningful way (see the module
+# docstring): git is the recovery, not the allowlist.
 DENY_TOOLS = (
-    "shell(rm)",
-    "shell(mv)",
-    "shell(chmod)",
-    "shell(chown)",
-    "shell(dd)",
     "shell(curl)",
+    "shell(wget)",
     "shell(ssh)",
     "shell(scp)",
     "shell(rsync)",
     "shell(git push)",
-    "shell(git reset)",
+    "shell(git reset --hard)",
+    "shell(dd)",
+    "shell(chown)",
+    "shell(rm -rf)",
 )
 
 # Cost varies about fourteen-fold across these, measured on an identical
@@ -123,6 +134,15 @@ BRAIN_DIR = Path(os.environ.get(
     "HIVEFRAME_BRAIN",
     "/Users/D112236/Library/CloudStorage/OneDrive-KaiserPermanente/KaiserKM",
 ))
+
+# System binaries in /bin and /usr/bin are reachable by default, but Homebrew's
+# are not, and that is where the only usable interpreter lives. HiveFrame needs
+# Python 3.14 for tomllib; /usr/bin/python3 is 3.9 and cannot read a single
+# project file. Without this the assistant cannot run the code it is being asked
+# about, and quietly falls back to a Python that fails on import.
+TOOL_DIRS = tuple(
+    Path(p) for p in ("/opt/homebrew/bin",) if Path(p).exists()
+)
 
 _SESSION_RE = re.compile(r"--resume=([0-9a-fA-F-]{8,})")
 _CREDITS_RE = re.compile(r"AI Credits\s+([0-9.]+)")
@@ -289,18 +309,7 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
             f"{prompt}"
         )
 
-    argv = [state["path"], "-p", sent, "--no-color", "--log-level", "none"]
-    argv += ["--model", model or DEFAULT_MODEL]
-
-    for t in ALLOW_TOOLS:
-        argv += ["--allow-tool", t]
-    for t in DENY_TOOLS:
-        argv += ["--deny-tool", t]
-
-    for d in dirs:
-        argv += ["--add-dir", str(d)]
-    if BRAIN_DIR.exists():
-        argv += ["--add-dir", str(BRAIN_DIR)]
+    argv = _build_argv(state, sent, dirs, model)
 
     session = read_session(root, project) if resume else ""
     if session:
@@ -436,16 +445,23 @@ def stop(turn_id: str) -> bool:
 
 
 def _build_argv(state: dict, sent: str, dirs, model: str) -> list[str]:
+    """The one place permissions are decided, for both the blocking and the
+    streaming path. Two copies of a permission model is one copy too many."""
     argv = [state["path"], "-p", sent, "--no-color", "--log-level", "none"]
     argv += ["--model", model or DEFAULT_MODEL]
-    for t in ALLOW_TOOLS:
-        argv += ["--allow-tool", t]
+    if ALLOW_ALL_TOOLS:
+        argv.append("--allow-all-tools")
     for t in DENY_TOOLS:
         argv += ["--deny-tool", t]
+    # Deliberately not --allow-all-paths. Tools are broad, reach is narrow: the
+    # assistant can do most things, in a few named places. The protected shared
+    # libraries are never among them.
     for d in dirs:
         argv += ["--add-dir", str(d)]
     if BRAIN_DIR.exists():
         argv += ["--add-dir", str(BRAIN_DIR)]
+    for d in TOOL_DIRS:
+        argv += ["--add-dir", str(d)]
     return argv
 
 

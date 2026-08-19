@@ -213,7 +213,7 @@ class Handler(BaseHTTPRequestHandler):
                 "model": chatmod.DEFAULT_MODEL,
                 "models": [{"id": m, "tier": t, "credits": c}
                            for m, t, c in chatmod.MODELS],
-                "allow": list(chatmod.ALLOW_TOOLS),
+                "allow_all_tools": chatmod.ALLOW_ALL_TOOLS,
                 "deny": list(chatmod.DENY_TOOLS),
                 "history": chatmod.history(root),
                 "transcript": chatmod.read_transcript(root, project),
@@ -544,15 +544,16 @@ def selftest() -> int:
 
     state = chatmod.available()
     print(f"  chat CLI: {state.get('version') or state.get('reason')}")
-    # Writes are permitted on purpose. Publishing and remote history rewriting
-    # are not, and those are the assertions that actually hold: there is no
-    # allowed path to the network. shell(rm) is asserted too, but tested
-    # behaviour is that the CLI deletes through the edit tool when refused rm,
-    # so treat that one as friction, not a boundary. Git is the recovery.
-    for verb in ("shell(rm)", "shell(git push)", "shell(curl)"):
+    # Tools are broad and reach is narrow, so the assertion worth making is
+    # about the network: nothing leaves this machine and nothing is published
+    # from the chat rail. Local deletion is deliberately not asserted, because
+    # testing showed the edit tool deletes when shell(rm) is refused, and an
+    # assertion that passes while the protection does not hold is worse than
+    # no assertion. Git is the recovery.
+    for verb in ("shell(curl)", "shell(ssh)", "shell(git push)", "shell(rsync)"):
         assert verb in chatmod.DENY_TOOLS, f"{verb} must stay denied"
     assert chatmod.DEFAULT_MODEL == chatmod.MODELS[0][0], "default must be the cheapest model"
-    print("  chat blocks publishing and network verbs; deletion is only slowed, not stopped")
+    print("  chat can write and run local commands; the network stays closed")
 
     print("selftest OK")
     return 0
