@@ -33,6 +33,34 @@ RELATION_STATUS = ("suggested", "confirmed", "rejected")
 # usually more urgent than the work it is holding up.
 LIVE_STATUSES = ("active", "blocked")
 
+# Altitude. Three tiers, because the whole board is one portfolio and a fourth
+# tier for a set of one is filing for its own sake.
+#
+#   program    a theme that holds work. It does not finish, it stops being worth
+#              running. Next-Gen Delivery Lab is the case: it generates
+#              hypotheses, some of which are promoted to projects, and asking
+#              when it is "done" is the wrong question.
+#   project    has an end state. A hypothesis is a small project: it resolves.
+#   operation  never ends, and that is correct rather than a defect. Admin is
+#              not a low-priority project, it is the tax paid before any project
+#              is chosen. See capacity() for the consequence.
+TIERS = ("program", "project", "operation")
+
+# Which tier may contain which. A project sits under a program or stands alone.
+# An operation is never contained: it belongs to no theme, it is overhead on all
+# of them.
+TIER_PARENT = {
+    "program": (),
+    "project": ("program",),
+    "operation": (),
+}
+
+# What a thing IS, now that tier carries how high it sits. Previously "kind"
+# tried to answer both and answered neither: "initiative" is an altitude,
+# "tool" is a nature, and sorting a list containing both is meaningless.
+KINDS = ("experiment", "tool", "deliverable", "analysis", "service", "admin",
+         "platform", "initiative")
+
 
 class StoreError(RuntimeError):
     """Raised when a caller reaches for a store it is not allowed to see."""
@@ -123,32 +151,59 @@ class Charter:
 
     Drift happens when the goal is out of sight, so this is not collapsible and
     not on a second tab.
+
+    A program gets its own charter rather than inheriting one. It answers a
+    different question from a project's, and the field that differs is the
+    ending: a project has done_when, a program has stop_when. Next-Gen Delivery
+    Lab has no completion state and should not be given a fake one, but it can
+    absolutely stop being worth running, and writing down what that looks like
+    is what stops a program becoming permanent by default.
     """
     problem: str = ""
     hypothesis: str = ""
     goal: str = ""
     kill_when: str = ""
     done_when: str = ""
+    stop_when: str = ""           # programs: what makes this no longer worth running
     constraints: list[str] = field(default_factory=list)
+
+    def complete_for(self, tier: str = "project") -> bool:
+        """A program is not incomplete for lacking done_when.
+
+        Judging every tier against the project's fields is how a program either
+        gets a fabricated end date or sits permanently flagged as unfinished.
+        """
+        if tier == "program":
+            return bool(self.problem and self.goal and self.stop_when)
+        if tier == "operation":
+            return bool(self.problem and self.goal)
+        return bool(self.problem and self.goal and self.done_when)
+
+    def missing_for(self, tier: str = "project") -> list[str]:
+        if tier == "program":
+            wanted = ("problem", "goal", "stop_when")
+        elif tier == "operation":
+            wanted = ("problem", "goal")
+        else:
+            wanted = ("problem", "hypothesis", "goal", "kill_when", "done_when")
+        return [n for n in wanted if not getattr(self, n)]
 
     @property
     def complete(self) -> bool:
-        return bool(self.problem and self.goal and self.done_when)
+        return self.complete_for("project")
 
     @property
     def missing(self) -> list[str]:
-        gaps = []
-        for name in ("problem", "hypothesis", "goal", "kill_when", "done_when"):
-            if not getattr(self, name):
-                gaps.append(name)
-        return gaps
+        return self.missing_for("project")
 
 
 @dataclass
 class Project:
     id: str
     name: str
-    kind: str = "initiative"      # initiative | experiment | commitment | admin
+    tier: str = "project"         # program | project | operation
+    parent: str = ""              # exactly one, or empty. See below.
+    kind: str = "initiative"      # what it is: experiment | tool | deliverable | ...
     horizon: str = ""             # H1 | H2 | H3
     status: str = "active"        # active | blocked | paused | done | killed
     store: str = "work"
@@ -160,6 +215,24 @@ class Project:
     relations: list[Relation] = field(default_factory=list)
     uses: list[str] = field(default_factory=list)   # tool ids, not tool copies
     source_file: Path | None = None
+
+    # Containment is a field, not a relation, and the distinction is load
+    # bearing. A relation is a claim: it can be suggested, confirmed or
+    # rejected, and there can be many of them. Containment is structural. One
+    # parent, no cycles, and the parent must sit higher. As a relation you get
+    # two parents and a loop, and any rollup computed over it is meaningless.
+
+    @property
+    def is_operation(self) -> bool:
+        return self.tier == "operation"
+
+    @property
+    def charter_complete(self) -> bool:
+        return self.charter.complete_for(self.tier)
+
+    @property
+    def charter_missing(self) -> list[str]:
+        return self.charter.missing_for(self.tier)
 
     @property
     def folders(self) -> list[tuple[str, str]]:
@@ -282,6 +355,8 @@ def load_project(path: Path) -> Project:
     return Project(
         id=p.get("id", path.stem),
         name=p.get("name", path.stem),
+        tier=p.get("tier", "project"),
+        parent=p.get("parent", ""),
         kind=p.get("kind", "initiative"),
         horizon=p.get("horizon", ""),
         status=p.get("status", "active"),
@@ -394,6 +469,81 @@ class Board:
         return out
 
 
+def hierarchy(projects: list[Project]) -> dict:
+    """Resolve containment, and report where it is broken rather than guessing.
+
+    Three failures are worth naming out loud, because each one hides work:
+    a parent that does not exist (the child is orphaned and invisible under any
+    program), a parent at the wrong altitude (a project owning a project is how
+    a program gets created by accident), and a cycle (which makes rollup
+    nonsense). None of these are repaired silently. A structure quietly fixed is
+    a structure nobody learns from.
+    """
+    by_id = {p.id: p for p in projects}
+    problems: list[dict] = []
+    children: dict[str, list[str]] = {p.id: [] for p in projects}
+    roots: list[str] = []
+
+    for p in projects:
+        if p.tier not in TIERS:
+            problems.append({"project": p.id, "issue": f"unknown tier {p.tier!r}"})
+        if not p.parent:
+            roots.append(p.id)
+            continue
+        parent = by_id.get(p.parent)
+        if parent is None:
+            problems.append({"project": p.id,
+                             "issue": f"parent {p.parent!r} does not exist"})
+            roots.append(p.id)
+            continue
+        allowed = TIER_PARENT.get(p.tier, ())
+        if parent.tier not in allowed:
+            problems.append({
+                "project": p.id,
+                "issue": f"a {p.tier} cannot sit under a {parent.tier}",
+            })
+        children.setdefault(parent.id, []).append(p.id)
+
+    # Cycles. Walk up from each node with a step budget; anything still walking
+    # after len(projects) hops is in a loop.
+    for p in projects:
+        seen, cur, n = {p.id}, p.parent, 0
+        while cur and n <= len(projects):
+            if cur in seen:
+                problems.append({"project": p.id, "issue": f"parent cycle through {cur}"})
+                break
+            seen.add(cur)
+            nxt = by_id.get(cur)
+            cur = nxt.parent if nxt else ""
+            n += 1
+
+    return {"roots": sorted(roots), "children": children, "problems": problems}
+
+
+def rollup(project: Project, projects: list[Project]) -> dict:
+    """A program's real state is its children's, not its own task list.
+
+    A program with no open tasks of its own is not idle if three projects
+    beneath it are moving. Reading the container instead of the contents is how
+    a healthy program looks dead and a stalled one looks fine.
+    """
+    h = hierarchy(projects)
+    by_id = {p.id: p for p in projects}
+    kids = [by_id[c] for c in h["children"].get(project.id, []) if c in by_id]
+
+    live = [k for k in kids if k.status in LIVE_STATUSES]
+    return {
+        "children": len(kids),
+        "live": len(live),
+        "blocked": len([k for k in kids if k.status == "blocked"]),
+        "stalled": len([k for k in live if k.stalled]),
+        "killed": len([k for k in kids if k.status == "killed"]),
+        "open_effort_h": round(sum(k.open_effort_h for k in live)
+                               + project.open_effort_h, 1),
+        "child_ids": [k.id for k in kids],
+    }
+
+
 def capacity(projects: list[Project], weekly_hours: float,
              horizon_days: int = 28, today: date | None = None) -> dict:
     """Fixed weekly budget against committed effort.
@@ -401,21 +551,35 @@ def capacity(projects: list[Project], weekly_hours: float,
     Fixed rather than calendar-derived on purpose: cruder, and it always works.
     Move to calendar-derived only if the fixed number proves too blunt.
 
+    Operations are subtracted before projects are measured, not ranked beside
+    them. You never actually choose between "do admin" and "do the platform
+    work": admin is the tax paid before any choice is available. Counting it as
+    a competitor inflates the apparent budget and then quietly eats it, which is
+    how a plan that looked affordable stops being one. What is left after the
+    tax is the only number that can honestly answer "can I take this on".
+
     Estimates are wrong at first. Logged focus sessions produce actual hours,
     so the correction is measured later rather than guessed now.
     """
     today = today or date.today()
     end = today + timedelta(days=horizon_days)
-    available = weekly_hours * (horizon_days / 7.0)
+    gross = weekly_hours * (horizon_days / 7.0)
 
     committed = 0.0
     undated = 0.0
+    operations = 0.0
     at_risk: list[dict] = []
 
     for p in projects:
         if p.status not in LIVE_STATUSES:
             continue
         for t in p.open_tasks:
+            if p.is_operation:
+                # Overhead lands in the window whether or not it carries a date,
+                # because it recurs. An undated operational task is not
+                # unscheduled, it is continuous.
+                operations += t.effort_h
+                continue
             if t.due is None:
                 undated += t.effort_h
                 continue
@@ -436,14 +600,20 @@ def capacity(projects: list[Project], weekly_hours: float,
                     "hours_available": round(hours_before_due, 1),
                 })
 
+    available = gross - operations
+
     return {
         "window_days": horizon_days,
         "weekly_hours": weekly_hours,
+        "gross_h": round(gross, 1),
+        "operations_h": round(operations, 1),
         "available_h": round(available, 1),
         "committed_h": round(committed, 1),
         "undated_h": round(undated, 1),
         "overcommitted_by_h": round(max(committed - available, 0), 1),
         "overcommitted": committed > available,
+        "consumed_by_operations": (round(operations / gross * 100)
+                                   if gross else 0),
         "at_risk": sorted(at_risk, key=lambda r: r["days_left"]),
     }
 
@@ -461,6 +631,15 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
 
     if project.status not in LIVE_STATUSES:
         return 0.0, [f"not live ({project.status})"]
+
+    # Operations do not compete for rank. They are removed from the budget in
+    # capacity() before anything is ranked, and letting them appear in the
+    # ordering would count the same hours twice: once as overhead, once as a
+    # rival. It is also a choice nobody makes. You do not decide between doing
+    # admin and doing the platform work, you do the admin and then decide.
+    # Zero here means "not in this contest", not "unimportant".
+    if project.is_operation:
+        return 0.0, ["operation, not ranked (taken off the top in capacity)"]
 
     if project.status == "blocked":
         why.append("blocked externally")
@@ -515,7 +694,7 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
         pts += 3
         why.append(f"{len(project.pending_relations)} relation(s) awaiting a verdict")
 
-    if not project.charter.complete:
+    if not project.charter_complete:
         pts += 5
         why.append("charter incomplete")
 

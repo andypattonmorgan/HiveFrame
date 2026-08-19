@@ -66,6 +66,12 @@ def dumps(project) -> str:
     L.append("[project]")
     L.append(_kv("id", project.id, 7))
     L.append(_kv("name", project.name, 7))
+    # Altitude and containment sit next to identity. Losing parent on a write is
+    # not a cosmetic bug: it silently orphans the project out of its program,
+    # which is the same disappearance this tier model exists to prevent.
+    L.append(_kv("tier", project.tier, 7))
+    if project.parent:
+        L.append(_kv("parent", project.parent, 7))
     L.append(_kv("kind", project.kind, 7))
     if project.horizon:
         L.append(_kv("horizon", project.horizon, 7))
@@ -81,8 +87,12 @@ def dumps(project) -> str:
         L.append(_kv("uses", project.uses, 7))
 
     c = project.charter
+    # stop_when belongs to programs, done_when to projects. Both are written
+    # when present rather than filtered by tier, so retiering a project does not
+    # quietly destroy the ending someone already wrote down.
     charter_rows = [(k, getattr(c, k)) for k in
-                    ("problem", "hypothesis", "goal", "kill_when", "done_when")]
+                    ("problem", "hypothesis", "goal", "kill_when", "done_when",
+                     "stop_when")]
     charter_rows = [(k, v) for k, v in charter_rows if v]
     if charter_rows or c.constraints:
         L.append("")

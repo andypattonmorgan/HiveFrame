@@ -27,7 +27,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from .model import Board, StoreError, capacity, score, tool_usage
+from .model import (Board, StoreError, capacity, hierarchy, rollup, score,
+                    tool_usage)
 from .verdict import VerdictError, capture, read_log, record_verdict
 from . import edit as edits
 from . import chat as chatmod
@@ -77,6 +78,8 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
         ranked.append({
             "id": p.id,
             "name": p.name,
+            "tier": p.tier,
+            "parent": p.parent,
             "kind": p.kind,
             "horizon": p.horizon,
             "status": p.status,
@@ -98,9 +101,10 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
                 "goal": p.charter.goal,
                 "kill_when": p.charter.kill_when,
                 "done_when": p.charter.done_when,
+                "stop_when": p.charter.stop_when,
                 "constraints": p.charter.constraints,
-                "complete": p.charter.complete,
-                "missing": p.charter.missing,
+                "complete": p.charter_complete,
+                "missing": p.charter_missing,
             },
             "artifacts": [{
                 "label": a.label, "path": a.path, "url": a.url,
@@ -123,6 +127,15 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
 
     ranked.sort(key=lambda r: -r["score"])
 
+    # Containment, resolved once here rather than recomputed per card. A program
+    # carries its children's state, because a program with no tasks of its own
+    # is not idle if three projects beneath it are moving.
+    h = hierarchy(projects)
+    by_id = {p.id: p for p in projects}
+    for row in ranked:
+        if row["tier"] == "program":
+            row["rollup"] = rollup(by_id[row["id"]], projects)
+
     tools = board.tools(stores)
     usage = tool_usage(tools, projects)
 
@@ -130,6 +143,7 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
         "generated": date.today().isoformat(),
         "stores": list(stores),
         "projects": ranked,
+        "hierarchy": h,
         "tools": [{
             "id": t.id, "name": t.name or t.id, "does": t.does, "where": t.where,
             "path": t.path, "status": t.status, "access": t.access, "note": t.note,
@@ -603,8 +617,32 @@ def selftest() -> int:
 
     cap = capacity(projects, 10.0)
     print(f"  capacity: {cap['committed_h']}h committed against "
-          f"{cap['available_h']}h available over {cap['window_days']}d")
+          f"{cap['available_h']}h available over {cap['window_days']}d "
+          f"({cap['operations_h']}h taken off the top for operations)")
     print(f"  at risk: {len(cap['at_risk'])} task(s)")
+
+    # Containment must resolve. A dangling or wrongly-aimed parent hides a
+    # project under nothing, which is exactly how the WBS work stayed off the
+    # board for weeks.
+    h = hierarchy(projects)
+    if h["problems"]:
+        for pr in h["problems"]:
+            print(f"  FAIL: {pr['project']}: {pr['issue']}")
+        return 1
+    tiers = {}
+    for p in projects:
+        tiers[p.tier] = tiers.get(p.tier, 0) + 1
+    print("  hierarchy: " + ", ".join(f"{n} {t}" for t, n in sorted(tiers.items()))
+          + f"; {len(h['roots'])} at the top, no orphans or cycles")
+
+    # An operation must never carry a rank. It is subtracted in capacity, and
+    # ranking it as well would count the same hours twice and offer a choice
+    # that is not really available.
+    for p in projects:
+        if p.is_operation:
+            assert score(p)[0] == 0.0, f"{p.id} is an operation and must not be ranked"
+    print("  operations are taken off the top, not ranked against projects")
+
     print(f"  vpn: {vpn_state()['label']}")
 
     # Writes are exercised on a copy in a temp directory. A selftest that edits
