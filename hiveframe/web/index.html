@@ -210,7 +210,18 @@
             display: grid;
             grid-template-columns: 14px 1fr auto;
             gap: 2px 6px;
-            align-items: baseline
+            align-items: baseline;
+            cursor: pointer
+        }
+
+        .ghead:hover {
+            background: #1a1e26
+        }
+
+        /* Collapsed, the header is the whole group, so it gets the bottom
+           padding the first child would have had. */
+        .ghead.closed {
+            padding-bottom: 10px
         }
 
         .ghead+.pitem {
@@ -1456,7 +1467,11 @@
 
             const loose = ps.filter(p => p.tier === "project" && !p.parent)
                 .sort((a, b) => b.score - a.score);
-            if (loose.length) groups.push({ key: "_loose", label: "No program", items: loose });
+            if (loose.length) groups.push({
+                key: "_loose", label: "Misc",
+                note: "not under a program", items: loose
+            });
+
 
             const ops = ps.filter(p => p.tier === "operation").sort((a, b) => b.score - a.score);
             if (ops.length) groups.push({
@@ -1505,12 +1520,15 @@
             if (r.stalled) bits.push(`${r.stalled} stalled`);
             if (r.open_effort_h) bits.push(`${r.open_effort_h}h open`);
             return `
-    <div class="ghead${closed ? " closed" : ""}">
-      <span class="gtwist" onclick="toggleGroup('${g.key}')">${closed ? "▸" : "▾"}</span>
-      <span class="gname${p.id === SEL ? " on" : ""}" onclick="pick('${p.id}')">${p.name}</span>
-      <span class="gtag">program</span>
+    <div class="ghead${closed ? " closed" : ""}" onclick="toggleGroup('${g.key}')">
+      <span class="gtwist">${closed ? "▸" : "▾"}</span>
+      <span class="gname${p.id === SEL ? " on" : ""}"
+            onclick="event.stopPropagation();pick('${p.id}')"
+            title="Open this program. Click anywhere else on this row to collapse it.">${p.name}</span>
+      <span class="gtag">program${closed ? ` · ${g.items.length}` : ""}</span>
       <div class="gmeta">${bits.join(" · ")}</div>
     </div>`;
+
         }
 
         function drawRail() {
@@ -1518,12 +1536,13 @@
             document.getElementById("plist").innerHTML = railGroups().map(g => {
                 const closed = !!GROUPS_CLOSED[g.key];
                 const head = g.head ? programHead(g) : `
-    <div class="ghead plain${closed ? " closed" : ""}">
-      <span class="gtwist" onclick="toggleGroup('${g.key}')">${closed ? "▸" : "▾"}</span>
-      <span class="gname" onclick="toggleGroup('${g.key}')">${g.label}</span>
+    <div class="ghead plain${closed ? " closed" : ""}" onclick="toggleGroup('${g.key}')">
+      <span class="gtwist">${closed ? "▸" : "▾"}</span>
+      <span class="gname">${g.label}</span>
       <span class="gtag">${g.items.length}</span>
       ${g.note ? `<div class="gmeta">${g.note}</div>` : ""}
     </div>`;
+
                 const body = closed ? "" : (g.items.map(p => pitem(p, !!g.head)).join("")
                     || `<div class="empty" style="padding:4px 16px 8px">Nothing under this program.</div>`);
                 return head + body;
@@ -1782,7 +1801,80 @@
             box.scrollTop = box.scrollHeight;
         }
 
+        /* ---- draft an instruction from a task ----
+           The prompt is loaded into the box rather than sent. A task title is a
+           note to yourself, not an instruction to anyone else, so the gap
+           between the two is exactly where you correct it. Sending straight
+           away would spend credits on a guess.
+
+           The model is picked from the task, not fixed, because the cheapest
+           capable model is the standing rule and the spread here is about
+           fourteen-fold on an identical prompt. The reason is shown, so a wrong
+           pick is visible rather than silent. */
+        const HEAVY_WORDS = /\b(design|architect|strategy|strategic|rewrite|refactor|migrat|decide|options?|trade[- ]?off|evaluate|assess|recommend|plan)\b/i;
+        const LIGHT_WORDS = /\b(rename|update|tidy|format|list|check|verify|link|typo|copy|move|delete|add a|note)\b/i;
+
+        function pickModel(t) {
+            const text = ((t.title || "") + " " + (t.note || ""));
+            const h = t.effort_h || 0;
+            if (LIGHT_WORDS.test(text) && h <= 1)
+                return { id: "gpt-5.4-mini", why: "small and mechanical" };
+            if (HEAVY_WORDS.test(text) || h >= 6)
+                return { id: "claude-sonnet-4.5", why: "judgment or multi-step work" };
+            if (h >= 2) return { id: "claude-sonnet-4.5", why: "over two hours of work" };
+            return { id: "gpt-5.4-mini", why: "cheapest model that can do this" };
+        }
+
+        function briefTask(id) {
+            const p = proj(SEL);
+            const t = (p.tasks || []).find(x => x.id === id);
+            if (!t) return;
+
+            const m = pickModel(t);
+            const sel = document.getElementById("cmodel");
+            /* Only if the CLI offers it. A model set to something the CLI does
+               not have would fail at send time with no clue why. */
+            if (sel && [...sel.options].some(o => o.value === m.id)) sel.value = m.id;
+
+            const c = p.charter || {};
+            const blockers = liveBlockers(t).map(b => {
+                const bt = (p.tasks || []).find(x => x.id === b);
+                return bt ? bt.title : b;
+            });
+
+            const lines = [];
+            lines.push(`Work on this move in ${p.name}.`);
+            lines.push("");
+            lines.push(`Move: ${t.title}`);
+            if (t.note) lines.push(`Why it matters: ${t.note}`);
+            if (t.due) lines.push(`Due: ${t.due}`);
+            if (t.effort_h) lines.push(`Estimated: ${t.effort_h}h`);
+            if (blockers.length) lines.push(`Waiting on: ${blockers.join("; ")}`);
+            lines.push("");
+            if (c.problem) lines.push(`Project problem: ${c.problem}`);
+            if (c.goal) lines.push(`What good looks like: ${c.goal}`);
+            if (p.folders && p.folders.length)
+                lines.push(`Project folders: ${p.folders.map(f => f.path).join("; ")}`);
+
+            lines.push("");
+            lines.push("Before changing anything, tell me what you plan to do and what you will touch.");
+            lines.push("Do not touch anything outside this project's folders.");
+
+
+            const box = document.getElementById("cprompt");
+            box.value = lines.join("\n");
+            /* Chat may be collapsed. Loading a prompt into a panel you cannot
+               see is a button that appears to do nothing. */
+            document.getElementById("app").classList.remove("nochat");
+            saveLayout();
+            box.focus();
+            box.setSelectionRange(box.value.length, box.value.length);
+            document.getElementById("cstat").textContent =
+                `Draft ready · ${m.id} (${m.why}) · edit before sending`;
+        }
+
         async function loadChat() {
+
             const r = await fetch("/api/chat/state?store=work");
             CHAT = await r.json();
             TURNS = CHAT.history || [];
@@ -2479,7 +2571,8 @@
             </select>`
                             : esc(t.status)}</td>
         <td>${t.status === "open" || t.status === "doing"
-                            ? `<button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>` : ""}</td>
+                            ? `<button class="vb" onclick="briefTask('${t.id}')" title="Load a draft instruction into chat">Ask</button>
+               <button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>` : ""}</td>
       </tr>`).join("")}
     </table>
     <p class="hint">Dropping asks for a reason and keeps the record. Deleting would
