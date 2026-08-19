@@ -86,9 +86,44 @@
         }
 
         /* A gutter next to a collapsed panel would be a handle that resizes
-           nothing, so it goes away with the panel. */
+           nothing, so it goes away with the panel.
+
+           Every child is pinned to its own column. Without that, a hidden
+           gutter drops out of the grid and everything after it slides one
+           track left, which put the chat panel in a 4px gutter track and made
+           it look like chat had vanished. */
+        .rail {
+            grid-column: 1
+        }
+
+        .g-rail {
+            grid-column: 2
+        }
+
+        .main {
+            grid-column: 3
+        }
+
+        .g-prev {
+            grid-column: 4
+        }
+
+        .prev {
+            grid-column: 5
+        }
+
+        .g-chat {
+            grid-column: 6
+        }
+
+        .crail {
+            grid-column: 7
+        }
+
         .app.nochat .gutter.g-chat,
-        .app.noprev .gutter.g-prev {
+        .app.noprev .gutter.g-prev,
+        .app.noprev .prev,
+        .app.nochat .crail {
             display: none
         }
 
@@ -1892,8 +1927,10 @@
         function showPrev(on) {
             const app = document.getElementById("app");
             app.classList.toggle("noprev", !on);
-            if (on && getComputedStyle(app).getPropertyValue("--w-prev").trim() === "0px")
-                app.style.setProperty("--w-prev", (LAYOUT.prev || 560) + "px");
+            /* An inline custom property outranks the .noprev class rule, so
+               closing has to remove it rather than rely on the class. */
+            if (on) app.style.setProperty("--w-prev", (LAYOUT.prev || 560) + "px");
+            else app.style.removeProperty("--w-prev");
         }
 
         function fileDirty() {
