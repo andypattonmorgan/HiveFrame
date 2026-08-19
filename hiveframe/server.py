@@ -201,6 +201,10 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
     return {
         "generated": date.today().isoformat(),
         "stores": list(stores),
+        # Named so the assistant does not have to guess it. Left to guess, it
+        # invents a plausible path and presents the invention as instructions.
+        "store_root": str(board.root_for(stores[0])) if stores else "",
+
         "projects": ranked,
         "hierarchy": h,
         "tools": [{

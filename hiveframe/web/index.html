@@ -1779,6 +1779,16 @@
             const p = SEL && BOARD ? proj(SEL) : null;
             if (p) {
                 bits.push(`Selected project: ${p.name} (id ${p.id}), ${p.kind}, horizon ${p.horizon || "none"}, status ${p.status}, score ${p.score}.`);
+                /* The file, named. Without it the assistant answers "I cannot
+                   write to the store" and then invents a plausible path, which
+                   is worse than refusing: it reads as instructions. It can
+                   write, it just could not see where. */
+                if (p.source_file)
+                    bits.push(`This project is stored in ${p.source_file}. `
+                        + "You can read and edit that file directly. Do not guess a path; use that one.");
+                if (p.folders && p.folders.length)
+                    bits.push(`Its content folders: ${p.folders.map(f => f.path).join("; ")}.`);
+
                 if (p.charter && p.charter.problem) bits.push(`Its problem: ${p.charter.problem}`);
                 if (p.charter && p.charter.kill_when) bits.push(`It dies when: ${p.charter.kill_when}`);
                 if (p.next_move) bits.push(`Next move: ${p.next_move.title}.`);
@@ -1811,6 +1821,17 @@
                 const orphan = (BOARD.tools || []).filter(t => !(t.used_by || []).length).map(t => t.id);
                 bits.push(`${(BOARD.tools || []).length} tools registered. Depended on by nothing: ${orphan.join(", ") || "none"}.`);
             }
+            /* Said once, on every turn. The assistant has file tools and write
+               access to the store and the declared project folders, and it was
+               declining work it could actually do. Naming the fence is the same
+               sentence as naming the permission. */
+            bits.push("You have file tools here. You can read and edit the project "
+                + "TOML files in the store and the files in the folders named above. "
+                + "Nothing outside those is reachable. If a change is asked for, make it, "
+                + "then say what you changed. Do not describe an edit for Andy to do by hand.");
+            if (BOARD && BOARD.store_root)
+                bits.push(`The store is ${BOARD.store_root}, one TOML per project.`);
+
             return bits.join(" ");
         }
 
