@@ -1233,14 +1233,30 @@
                 "Loaded " + BOARD.generated + " · writes local files only, no live system";
         }
 
+        /* One place that changes tab, so the button highlight can never disagree
+           with what is on screen. */
+        function setView(v) {
+            VIEW = v;
+            document.querySelectorAll(".tab[data-v]").forEach(x => x.classList.toggle("on", x.dataset.v === v));
+            draw();
+            if (v === "triage") loadLog();
+            paintCtx();
+        }
+
         /* Switching project closes the open file. Leaving it open would show one
            project's file under another project's heading, which is precisely the
-           bleed this tool exists to stop. */
+           bleed this tool exists to stop.
+
+           Picking a project also returns you to Project. A link on the Triage or
+           Capacity tab is a request to go look at that project, and selecting it
+           silently behind a summary table answers a question nobody asked. */
         function pick(id) {
             if (FILE && FILE_DIRTY && !confirm("Unsaved changes to " + (FILE.rel || FILE.name) + " will be lost. Switch anyway?")) return;
             SEL = id; FILE = null; FILE_DIRTY = false;
-            drawRail(); draw(); paintCtx(); syncChatProject();
+            drawRail(); syncChatProject();
+            setView("project");
         }
+
 
 
         function draw() {
@@ -2357,12 +2373,7 @@
             }
         });
 
-        document.querySelectorAll(".tab[data-v]").forEach(b => b.onclick = () => {
-            document.querySelectorAll(".tab[data-v]").forEach(x => x.classList.remove("on"));
-            b.classList.add("on"); VIEW = b.dataset.v; draw();
-            if (VIEW === "triage") loadLog();
-            paintCtx();
-        });
+        document.querySelectorAll(".tab[data-v]").forEach(b => b.onclick = () => setView(b.dataset.v));
 
         /* Chat controls are bound once, because the rail is markup rather than a
            re-rendered string. That is most of the reason it is a rail. */
