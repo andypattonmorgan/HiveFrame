@@ -202,6 +202,67 @@
             border-left-color: var(--acc)
         }
 
+        /* ---- program grouping ----
+           Children are indented and share a hairline, so the rail shows what
+           belongs to what without a second level of disclosure triangles. */
+        .ghead {
+            padding: 10px 14px 4px;
+            display: grid;
+            grid-template-columns: 14px 1fr auto;
+            gap: 2px 6px;
+            align-items: baseline
+        }
+
+        .ghead+.pitem {
+            padding-top: 6px
+        }
+
+        .gtwist {
+            color: var(--faint);
+            cursor: pointer;
+            font-size: 10px;
+            user-select: none
+        }
+
+        .gname {
+            font-size: 12.5px;
+            font-weight: 650;
+            cursor: pointer
+        }
+
+        .gname.on {
+            color: var(--acc)
+        }
+
+        .ghead.plain .gname {
+            color: var(--faint);
+            font-size: 11px;
+            letter-spacing: .07em;
+            text-transform: uppercase;
+            font-weight: 600
+        }
+
+        .gtag {
+            color: var(--faint);
+            font-size: 10.5px
+        }
+
+        .gmeta {
+            grid-column: 2/4;
+            color: var(--faint);
+            font-size: 11px
+        }
+
+        .pitem.sub {
+            padding-left: 26px;
+            margin-left: 20px;
+            border-left: 1px solid var(--line)
+        }
+
+        .pitem.sub.on {
+            border-left-color: var(--acc)
+        }
+
         .pname {
             font-size: 13.5px;
             font-weight: 550;
@@ -1352,21 +1413,121 @@
 
         function proj(id) { return BOARD.projects.find(p => p.id === id); }
 
-        function drawRail() {
-            document.getElementById("cnt").textContent = BOARD.projects.length;
-            document.getElementById("plist").innerHTML = BOARD.projects.map(p => `
-    <div class="pitem${p.id === SEL ? " on" : ""}" onclick="pick('${p.id}')">
+        /* ---- the rail, grouped by program ----
+           A flat ranked list was the right first shape and the wrong second one.
+           It answered "what is highest priority" and hid "what belongs to what",
+           which is the question a portfolio exists to answer. Programs group
+           their projects; a project with no program stands on its own; and
+           operations sit last in their own group, because they are the tax
+           taken off the top rather than candidates ranked against the work.
+
+           A program is ordered by its best child, not by its own score. Its own
+           score is near meaningless, since the work lives in the children, and
+           ranking a container by an empty task list buries a live program under
+           a small standalone project. */
+        const GROUP_KEY = "hiveframe.groupsclosed";
+        let GROUPS_CLOSED = {};
+        try { GROUPS_CLOSED = JSON.parse(localStorage.getItem(GROUP_KEY) || "{}"); } catch (e) { }
+
+        function toggleGroup(k) {
+            GROUPS_CLOSED[k] = !GROUPS_CLOSED[k];
+            try { localStorage.setItem(GROUP_KEY, JSON.stringify(GROUPS_CLOSED)); } catch (e) { }
+            drawRail();
+        }
+
+        function railGroups() {
+            const ps = BOARD.projects;
+            const kids = (BOARD.hierarchy && BOARD.hierarchy.children) || {};
+            const groups = [];
+
+            const childrenOf = id => (kids[id] || []).map(proj).filter(Boolean)
+                .filter(c => c.tier !== "operation")
+                .sort((a, b) => b.score - a.score);
+
+            ps.filter(p => p.tier === "program")
+                .map(p => ({ key: p.id, head: p, items: childrenOf(p.id) }))
+                .forEach(g => groups.push(g));
+
+            /* Ordered by the best child so a live program cannot be buried by a
+               container score of nearly zero. A program with no children still
+               shows, because an empty program is a finding. */
+            groups.sort((a, b) => (b.items[0] ? b.items[0].score : b.head.score)
+                - (a.items[0] ? a.items[0].score : a.head.score));
+
+            const loose = ps.filter(p => p.tier === "project" && !p.parent)
+                .sort((a, b) => b.score - a.score);
+            if (loose.length) groups.push({ key: "_loose", label: "No program", items: loose });
+
+            const ops = ps.filter(p => p.tier === "operation").sort((a, b) => b.score - a.score);
+            if (ops.length) groups.push({
+                key: "_ops", label: "Operations",
+                note: "taken off the top, not ranked against the work", items: ops
+            });
+
+            /* Anything the hierarchy could not place. Better shown in an ugly
+               bucket than silently absent from the rail. */
+            const shown = new Set(groups.flatMap(g => g.items.map(i => i.id))
+                .concat(groups.map(g => g.head && g.head.id).filter(Boolean)));
+            const orphans = ps.filter(p => !shown.has(p.id));
+            if (orphans.length) groups.push({
+                key: "_orphan", label: "Unplaced",
+                note: "parent missing or at the wrong altitude", items: orphans
+            });
+            return groups;
+        }
+
+        function pitem(p, indent) {
+            return `
+    <div class="pitem${p.id === SEL ? " on" : ""}${indent ? " sub" : ""}" onclick="pick('${p.id}')">
       <div class="pname">${p.name}</div>
       <div class="pmeta">
         ${p.horizon ? `<span class="hz" title="${HZ_MEANS[p.horizon] || ""}" style="background:${HZ[p.horizon] || "#555"}">${p.horizon}</span>` : ""}
         ${p.kind} · ${p.open_tasks} open${p.next_due ? ` · due ${p.next_due}` : ""}
       </div>
       <div class="pmeta">${p.stalled
-                    ? `<span class="chip" style="background:var(--stop)">nothing can start today</span>`
-                    : (p.next_move ? `next: ${p.next_move.title}${p.next_move.effort_h ? ` (${p.next_move.effort_h}h)` : ""}` : "")}
+                ? `<span class="chip" style="background:var(--stop)">nothing can start today</span>`
+                : (p.next_move ? `next: ${p.next_move.title}${p.next_move.effort_h ? ` (${p.next_move.effort_h}h)` : ""}` : "")}
       </div>
       <div class="pscore" title="Priority score">${p.score}</div>
-    </div>`).join("");
+    </div>`;
+        }
+
+        /* A program's own line reports its children's state, not its task list.
+           A program with nothing open of its own is not idle if three projects
+           beneath it are moving. */
+        function programHead(g) {
+            const p = g.head, r = p.rollup || {};
+            const closed = !!GROUPS_CLOSED[g.key];
+            const bits = [];
+            if (r.children) bits.push(`${r.live || 0} of ${r.children} live`);
+            else bits.push("no projects yet");
+            if (r.blocked) bits.push(`${r.blocked} blocked`);
+            if (r.stalled) bits.push(`${r.stalled} stalled`);
+            if (r.open_effort_h) bits.push(`${r.open_effort_h}h open`);
+            return `
+    <div class="ghead${closed ? " closed" : ""}">
+      <span class="gtwist" onclick="toggleGroup('${g.key}')">${closed ? "▸" : "▾"}</span>
+      <span class="gname${p.id === SEL ? " on" : ""}" onclick="pick('${p.id}')">${p.name}</span>
+      <span class="gtag">program</span>
+      <div class="gmeta">${bits.join(" · ")}</div>
+    </div>`;
+        }
+
+        function drawRail() {
+            document.getElementById("cnt").textContent = BOARD.projects.length;
+            document.getElementById("plist").innerHTML = railGroups().map(g => {
+                const closed = !!GROUPS_CLOSED[g.key];
+                const head = g.head ? programHead(g) : `
+    <div class="ghead plain${closed ? " closed" : ""}">
+      <span class="gtwist" onclick="toggleGroup('${g.key}')">${closed ? "▸" : "▾"}</span>
+      <span class="gname" onclick="toggleGroup('${g.key}')">${g.label}</span>
+      <span class="gtag">${g.items.length}</span>
+      ${g.note ? `<div class="gmeta">${g.note}</div>` : ""}
+    </div>`;
+                const body = closed ? "" : (g.items.map(p => pitem(p, !!g.head)).join("")
+                    || `<div class="empty" style="padding:4px 16px 8px">Nothing under this program.</div>`);
+                return head + body;
+            }).join("");
 
             const v = BOARD.vpn, c = BOARD.capacity;
             document.getElementById("railfoot").innerHTML =
