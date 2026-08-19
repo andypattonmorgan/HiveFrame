@@ -268,6 +268,11 @@
             border-left-color: var(--acc)
         }
 
+        tr.editing>td {
+            background: #1a1e26;
+            vertical-align: top
+        }
+
         .pname {
             font-size: 13.5px;
             font-weight: 550;
@@ -2651,7 +2656,24 @@
 
     ${p.tasks.length ? `<table>
       <tr><th>#</th><th>Move</th><th>Due</th><th>Days left</th><th>Hours</th><th>Flags</th><th>Status</th><th></th></tr>
-      ${p.tasks.map(t => `<tr>
+      ${p.tasks.map(t => TEDIT === t.id ? `<tr class="editing"><td class="num tnum">${TNUM[t.id] || ""}</td>
+        <td colspan="7">
+          <input class="ed" id="te-title" value="${esc(t.title)}"
+                 placeholder="What is the move? Be specific enough to start.">
+          <div class="grid2" style="margin-top:7px">
+            <input class="ed" id="te-due" type="date" value="${t.due || ""}">
+            <input class="ed" id="te-effort" type="number" step="0.25" min="0"
+                   value="${t.effort_h || ""}" placeholder="Effort, hours">
+            <label class="fl"><input type="checkbox" id="te-urgent"${t.urgent ? " checked" : ""}> urgent</label>
+            <label class="fl"><input type="checkbox" id="te-important"${t.important ? " checked" : ""}> important</label>
+          </div>
+          <input class="ed" id="te-note" value="${esc(t.note || "")}"
+                 placeholder="Note, optional. Why this matters." style="margin-top:7px">
+          <div class="vrow"><button class="sm pri" onclick="saveTask('${t.id}')">Save</button>
+            <button class="sm" onclick="editTask('')">Cancel</button></div>
+          <p class="hint">Clearing the date removes it. Hours drive the capacity
+             numbers, so a guess you correct later beats a blank.</p>
+        </td></tr>` : `<tr>
         <td class="num tnum">${TNUM[t.id] || ""}</td>
         <td>${esc(t.title)}${liveBlockers(t).length ? ` <span class="chip" style="background:var(--stop)">waiting on ${liveBlockers(t).map(b => "#" + TNUM[b]).join(", ")}</span>` : ""}
           ${t.note ? `<div class="why">${esc(t.note)}</div>` : ""}</td>
@@ -2667,7 +2689,8 @@
             </select>`
                             : esc(t.status)}</td>
         <td>${t.status === "open" || t.status === "doing"
-                            ? `<button class="vb" onclick="focusTask('${t.id}')" title="Point the focus timer at this">Focus</button>
+                            ? `<button class="vb" onclick="editTask('${t.id}')" title="Correct the wording, date or estimate">Edit</button>
+               <button class="vb" onclick="focusTask('${t.id}')" title="Point the focus timer at this">Focus</button>
                <button class="vb" onclick="briefTask('${t.id}')" title="Load a draft instruction into chat">Ask</button>
                <button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>` : ""}</td>
       </tr>`).join("")}
@@ -2832,6 +2855,37 @@
             });
         }
         async function taskField(id, k, v) { await api({ action: "task.edit", task: id, fields: { [k]: v } }); }
+
+        /* ---- correcting a move ----
+           A task is written in a hurry and read for weeks. The wording drifts
+           from what the work turned out to be, the date slips, the estimate was
+           a guess. Editing in place is how the board keeps saying something
+           true; the alternative is dropping it and adding a near-duplicate,
+           which loses the record and the hours with it.
+
+           One row at a time. Two open editors is two sets of unsaved changes
+           and no way to tell which is which. */
+        let TEDIT = "";
+
+        function editTask(id) { TEDIT = id; draw(); }
+
+        async function saveTask(id) {
+            const v = i => document.getElementById(i).value;
+            const ck = i => document.getElementById(i).checked;
+            const title = v("te-title").trim();
+            /* Caught here as well as on the server, so the answer is instant
+               and the typed row is not thrown away to find out. */
+            if (!title) { alert("A move needs a title."); return; }
+            TEDIT = "";
+            await api({
+                action: "task.edit", task: id, fields: {
+                    title, due: v("te-due"), effort_h: v("te-effort") || 0,
+                    urgent: ck("te-urgent"), important: ck("te-important"),
+                    note: v("te-note").trim()
+                }
+            });
+        }
+
         async function dropTask(id) {
             const why = prompt("Why is this task dropped? It stays on the record with the reason.");
             if (why === null) return;
