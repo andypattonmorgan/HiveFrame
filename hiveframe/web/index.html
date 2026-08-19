@@ -549,6 +549,13 @@
             font-size: 11.5px
         }
 
+        td.tnum {
+            color: var(--faint);
+            width: 1%;
+            white-space: nowrap;
+            padding-right: 10px
+        }
+
         /* File preview. Sits above the tree so the file you opened does not
            push the tree you are browsing off the screen. */
         .fprev {
@@ -1050,6 +1057,44 @@
         };
         const fieldLabel = k => FIELD_LABEL[k] || k.replace(/_/g, " ");
 
+        /* Task numbers.
+
+           A task's real identity is its id, which is a slug like
+           "chase-ritm": stable, but nobody says it out loud. The number is a
+           handle for talking, so "do 3" and "what is 3 waiting on" both work
+           without reading a slug back.
+
+           Deliberately scoped to the selected project and recomputed on every
+           draw. A board-wide number would have to stay stable across a project
+           being added or a task being dropped, and a number that silently
+           points at something else is worse than no number. Within one project,
+           in the order shown, the number is exactly what is on screen.
+
+           TNUM maps id to number, TIDX maps number to task, so the display and
+           the assistant cannot disagree about which task is which. */
+        let TNUM = {}, TIDX = {};
+
+        function numberTasks(p) {
+            TNUM = {}; TIDX = {};
+            let n = 0;
+            (p.tasks || []).forEach(t => {
+                if (t.status !== "open" && t.status !== "doing") return;
+                n += 1; TNUM[t.id] = n; TIDX[n] = t;
+            });
+            return n;
+        }
+
+        /* Only a blocker that is still open is a blocker.
+
+           The table used to print every id in blocked_by, so a task whose
+           dependency had been finished or dropped still read "waiting on
+           explain-server-wedge" while ranking as startable. The screen said
+           stop and the ranking said go. Numbering the tasks is what made it
+           visible, because the referenced number was not in the list. */
+        function liveBlockers(t) {
+            return (t.blocked_by || []).filter(b => TNUM[b]);
+        }
+
         let BOARD = null, SEL = null, VIEW = "project";
 
         async function load() {
@@ -1082,7 +1127,13 @@
                 `<div><i class="dot" style="background:${v.tunnel ? "var(--ok)" : "var(--stop)"}"></i>${v.label}</div>
      <div style="margin-top:5px"><i class="dot" style="background:${c.overcommitted ? "var(--stop)" : "var(--ok)"}"></i>
      ${c.committed_h}h promised of ${c.available_h}h free in the next ${c.window_days} days</div>`;
-            document.getElementById("stamp").textContent = "Loaded " + BOARD.generated + " · read-only";
+            /* This label was "read-only" long after that stopped being true.
+               A posture claim that nobody re-checks is worse than no claim,
+               because it is the line someone would quote. What is actually
+               true: every production system is still read-only, and the only
+               things written are files on this laptop. */
+            document.getElementById("stamp").textContent =
+                "Loaded " + BOARD.generated + " · writes local files only, no live system";
         }
 
         /* Switching project closes the open file. Leaving it open would show one
@@ -1219,6 +1270,26 @@
                 if (p.charter && p.charter.kill_when) bits.push(`It dies when: ${p.charter.kill_when}`);
                 if (p.next_move) bits.push(`Next move: ${p.next_move.title}.`);
                 bits.push(`Open tasks: ${p.open_tasks}. Why it ranks: ${(p.why || []).join("; ")}.`);
+
+                /* The numbered list, verbatim as the screen shows it. Andy says
+                   "do 3"; without this the assistant has to guess which task
+                   that is, and a wrong guess acts on the wrong work. The id is
+                   included because that is what the project file is keyed on. */
+                const nums = numberTasks(p);
+                if (nums) {
+                    bits.push("Open moves, numbered as they appear on screen. "
+                        + "When Andy refers to a number, it means this task:");
+                    for (let i = 1; i <= nums; i++) {
+                        const t = TIDX[i];
+                        const parts = [t.title];
+                        if (t.due) parts.push("due " + t.due);
+                        if (t.effort_h) parts.push(t.effort_h + "h");
+                        if (t.urgent) parts.push("urgent");
+                        if (liveBlockers(t).length)
+                            parts.push("waiting on " + liveBlockers(t).map(b => "#" + TNUM[b]).join(", "));
+                        bits.push(`  ${i}. ${parts.join(", ")} [id ${t.id}]`);
+                    }
+                }
             }
             if (VIEW === "brief" || VIEW === "triage") {
                 bits.push("Board order: " + BOARD.projects.map(x => `${x.name} ${x.score}`).join(", ") + ".");
@@ -1751,6 +1822,7 @@
             if (!p) return `<p class="empty">No projects. Add a .toml file to the projects directory.</p>`;
             const c = p.charter;
             const esc = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+            numberTasks(p);
 
             /* Charter fields are editable in place. The charter is the thing that stops
                drift, so making it hard to correct guarantees it goes stale and stops
@@ -1812,9 +1884,10 @@
     </div>
 
     ${p.tasks.length ? `<table>
-      <tr><th>Move</th><th>Due</th><th>Days left</th><th>Hours</th><th>Flags</th><th>Status</th><th></th></tr>
+      <tr><th>#</th><th>Move</th><th>Due</th><th>Days left</th><th>Hours</th><th>Flags</th><th>Status</th><th></th></tr>
       ${p.tasks.map(t => `<tr>
-        <td>${esc(t.title)}${t.blocked_by.length ? ` <span class="chip" style="background:var(--stop)">waiting on ${t.blocked_by.join(", ")}</span>` : ""}
+        <td class="num tnum">${TNUM[t.id] || ""}</td>
+        <td>${esc(t.title)}${liveBlockers(t).length ? ` <span class="chip" style="background:var(--stop)">waiting on ${liveBlockers(t).map(b => "#" + TNUM[b]).join(", ")}</span>` : ""}
           ${t.note ? `<div class="why">${esc(t.note)}</div>` : ""}</td>
         <td class="num">${t.due || "<span class='why'>none</span>"}</td>
         <td class="num ${t.days_left !== null && t.days_left < 0 ? "missing" : ""}">${t.days_left === null ? "" : t.days_left + "d"}</td>

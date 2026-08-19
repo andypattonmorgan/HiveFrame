@@ -6,7 +6,12 @@ reach, it will need keychain access later, and file:// blocks fetch.
 
 Bound to 127.0.0.1. There is no auth because there is no network exposure.
 
-Read-only in this phase: every endpoint is a GET and nothing is written.
+What it writes, and what it does not. Every production system stays read-only;
+nothing here calls Jira, ServiceNow, Concerto, Confluence or PMDW at all. The
+writes are all local files: project TOMLs in the store, the decision and inbox
+logs, and a file opened through the preview pane, which is fenced to the folders
+this board already declares. A previous version of this docstring said
+"read-only" for weeks after that stopped being true.
 
 Usage:
     python3 -m hiveframe.server --port 8787
@@ -890,7 +895,7 @@ def main() -> int:
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"HiveFrame on http://127.0.0.1:{args.port}")
     print(f"  weekly budget: {args.weekly_hours}h")
-    print("  read-only. Ctrl-C to stop.")
+    print("  writes local files only, no live system. Ctrl-C to stop.")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
