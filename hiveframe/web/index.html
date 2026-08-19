@@ -38,9 +38,20 @@
             font: 14.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif
         }
 
+        /* Four columns, each with a drag handle between it and the next.
+
+           Widths are CSS variables so a drag is one property write rather than
+           a re-layout, and they persist, because a layout you have to rebuild
+           every morning is one you stop adjusting. The preview column is 0 wide
+           until a file is open: an empty panel taking a third of the screen is
+           worse than no panel. */
         .app {
+            --w-rail: 290px;
+            --w-prev: 0px;
+            --w-chat: 380px;
             display: grid;
-            grid-template-columns: 290px 1fr 380px;
+            grid-template-columns:
+                var(--w-rail) 4px minmax(320px, 1fr) 4px var(--w-prev) 4px var(--w-chat);
             height: 100vh
         }
 
@@ -48,7 +59,43 @@
            answer on screen, and an assistant you lose by glancing away is one
            you stop asking. */
         .app.nochat {
-            grid-template-columns: 290px 1fr 0
+            --w-chat: 0px
+        }
+
+        .app.noprev {
+            --w-prev: 0px
+        }
+
+        .gutter {
+            background: transparent;
+            cursor: col-resize;
+            position: relative
+        }
+
+        .gutter::after {
+            content: "";
+            position: absolute;
+            inset: 0 1px;
+            background: var(--line);
+            transition: background .12s
+        }
+
+        .gutter:hover::after,
+        .gutter.dragging::after {
+            background: var(--accent, #4c9aff)
+        }
+
+        /* A gutter next to a collapsed panel would be a handle that resizes
+           nothing, so it goes away with the panel. */
+        .app.nochat .gutter.g-chat,
+        .app.noprev .gutter.g-prev {
+            display: none
+        }
+
+        /* While dragging, the iframe would swallow the pointer and the drag
+           would stop halfway across a PDF. */
+        body.dragging iframe {
+            pointer-events: none
         }
 
         /* ---- left rail: the projects, always visible ---- */
@@ -556,38 +603,74 @@
             padding-right: 10px
         }
 
-        /* File preview. Sits above the tree so the file you opened does not
-           push the tree you are browsing off the screen. */
-        .fprev {
-            border: 1px solid #1e222b;
-            border-radius: 8px;
-            background: #0f1218;
-            margin-bottom: 14px
+        /* ---- preview panel ----
+           Its own column, full height, so a file is read beside the project
+           rather than inside a card that pushes the project off screen. */
+        .prev {
+            background: var(--rail);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0
         }
 
         .fhead {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 8px 10px;
-            border-bottom: 1px solid #1e222b
+            gap: 8px;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--line);
+            flex: 0 0 auto
         }
 
         .fname {
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
             font-size: 12.5px;
             color: var(--ink);
-            word-break: break-all
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1 1 auto;
+            min-width: 0
+        }
+
+        .fbody2 {
+            flex: 1 1 auto;
+            overflow: auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column
+        }
+
+        .fbody2 iframe {
+            border: 0;
+            width: 100%;
+            height: 100%;
+            flex: 1 1 auto;
+            background: #fff
+        }
+
+        .fbody2 img {
+            max-width: 100%;
+            display: block;
+            margin: 0 auto
+        }
+
+        /* Rendered markdown gets a readable measure, not the full panel width. */
+        .fread {
+            padding: 18px 22px;
+            overflow: auto;
+            max-width: 74ch
         }
 
         textarea.fedit {
             width: 100%;
             box-sizing: border-box;
-            min-height: 420px;
-            resize: vertical;
+            flex: 1 1 auto;
+            min-height: 0;
+            resize: none;
             border: 0;
-            background: #0f1218;
+            background: var(--bg);
             color: var(--ink);
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
             font-size: 12.5px;
@@ -598,8 +681,14 @@
         }
 
         .ffoot {
-            padding: 6px 10px;
-            border-top: 1px solid #1e222b
+            padding: 6px 12px;
+            border-top: 1px solid var(--line);
+            flex: 0 0 auto
+        }
+
+        .fempty {
+            padding: 22px;
+            color: var(--faint)
         }
 
         .tree-dir {
@@ -967,7 +1056,7 @@
 </head>
 
 <body>
-    <div class="app">
+    <div class="app noprev" id="app">
 
         <aside class="rail">
             <div class="brand"><i class="hex"></i><b>HiveFrame</b><span id="cnt"></span></div>
@@ -975,6 +1064,8 @@
             <div class="plist" id="plist"></div>
             <div class="railfoot" id="railfoot"></div>
         </aside>
+
+        <div class="gutter g-rail" data-drag="rail"></div>
 
         <div class="main">
             <div class="topbar">
@@ -989,6 +1080,12 @@
             </div>
             <div class="wrap" id="view"></div>
         </div>
+
+        <div class="gutter g-prev" data-drag="prev"></div>
+
+        <aside class="prev" id="prev"></aside>
+
+        <div class="gutter g-chat" data-drag="chat"></div>
 
         <aside class="crail" id="crail">
             <div class="chead">
@@ -1739,8 +1836,7 @@
   <div class="card">
     <h2>Files<span class="toolbar">
       <button class="sm" onclick='loadTree(${JSON.stringify(id)}, true)'>Refresh</button></span></h2>
-    <p class="hint">This project's folders only. Click a file to open it here.${t.note ? ` <span class="gap">${esc(t.note)}</span>` : ""}</p>
-    ${filePane()}
+    <p class="hint">This project's folders only. Click a file to open it in the preview panel.${t.note ? ` <span class="gap">${esc(t.note)}</span>` : ""}</p>
     ${(t.roots || []).map(r => `
       <h2 style="margin-top:14px">${esc(r.label)}</h2>
       ${treeNode(Object.assign({ open: true }, r.tree))}
@@ -1749,26 +1845,39 @@
 `;
         }
 
-        /* ---- file preview: open, edit, save ----
+        /* ---- preview panel: open, read, edit, save ----
            Read and write go through the server, which allows only paths inside
            a folder this board already declares. The browser sends a path; it
-           does not get to choose what counts as reachable. */
-        let FILE = null, FILE_DIRTY = false;
+           does not get to choose what counts as reachable.
+
+           The panel is a sibling of the main column, not a card inside it, so
+           opening a file does not push the project you were reading off the
+           screen. That was the first version and it was the wrong shape: a
+           preview that displaces the thing it is previewing for. */
+        let FILE = null, FILE_DIRTY = false, FILE_SRC = false;
 
         async function openFile(path) {
             if (FILE_DIRTY && !confirm("Unsaved changes will be lost. Open anyway?")) return;
-            FILE = { path, loading: true }; FILE_DIRTY = false; draw();
+            FILE = { path, loading: true }; FILE_DIRTY = false; FILE_SRC = false;
+            showPrev(true); drawPrev();
             const r = await fetch("/api/file?path=" + encodeURIComponent(path));
             const d = await r.json();
             FILE = r.ok ? d : { path, error: d.error || "could not open" };
-            draw();
-            const ta = document.getElementById("fedit");
-            if (ta) ta.focus();
+            drawPrev();
         }
 
         function closeFile() {
             if (FILE_DIRTY && !confirm("Unsaved changes will be lost. Close anyway?")) return;
-            FILE = null; FILE_DIRTY = false; draw();
+            FILE = null; FILE_DIRTY = false; showPrev(false); drawPrev();
+        }
+
+        /* The panel takes width only while something is in it. An empty third
+           of the screen is worse than no panel. */
+        function showPrev(on) {
+            const app = document.getElementById("app");
+            app.classList.toggle("noprev", !on);
+            if (on && getComputedStyle(app).getPropertyValue("--w-prev").trim() === "0px")
+                app.style.setProperty("--w-prev", (LAYOUT.prev || 560) + "px");
         }
 
         function fileDirty() {
@@ -1777,6 +1886,8 @@
             const s = document.getElementById("fstate");
             if (s) { s.textContent = "unsaved changes"; s.className = "gap"; }
         }
+
+        function toggleSource() { FILE_SRC = !FILE_SRC; drawPrev(); }
 
         async function saveFile() {
             const ta = document.getElementById("fedit");
@@ -1790,31 +1901,56 @@
             });
             const d = await r.json();
             if (!r.ok) { if (s) { s.textContent = d.error || "save refused"; s.className = "missing"; } return; }
-            FILE.text = ta.value; FILE_DIRTY = false;
+            FILE.text = ta.value; FILE.size = d.bytes; FILE_DIRTY = false;
             if (s) { s.textContent = "saved, " + fsize(d.bytes) + ", previous version kept as .bak"; s.className = "why"; }
             /* A project file that was just edited is the board. Reload it, or
                the screen and the file disagree until the next refresh. */
             if (FILE.path.endsWith(".toml")) await load();
         }
 
-        function filePane() {
-            if (!FILE) return "";
-            if (FILE.loading) return `<div class="fprev"><p class="empty">Opening…</p></div>`;
+        function drawPrev() {
+            const el = document.getElementById("prev");
+            if (!FILE) { el.innerHTML = ""; return; }
+
+            const raw = "/api/raw?path=" + encodeURIComponent(FILE.path);
+            const isMd = /\.md$/i.test(FILE.path);
+            const canRender = (isMd || FILE.kind === "html") && FILE.editable;
+
             const head = `<div class="fhead">
-        <span class="fname">${esc(FILE.rel || FILE.name || FILE.path)}</span>
-        <span class="toolbar">
-          ${FILE.editable ? `<button class="sm pri" onclick="saveFile()">Save</button>` : ""}
-          <button class="sm" onclick='reveal(${JSON.stringify(FILE.path)})'>Finder</button>
-          <button class="sm" onclick="closeFile()">Close</button>
-        </span></div>`;
-            if (FILE.error) return `<div class="fprev">${head}<p class="empty">${esc(FILE.error)}</p></div>`;
-            if (!FILE.editable) return `<div class="fprev">${head}
-        <p class="empty">${esc(FILE.reason || "not editable here")}. ${fsize(FILE.size || 0)}.
-        Open it in Finder instead.</p></div>`;
-            return `<div class="fprev">${head}
-      <textarea class="fedit" id="fedit" spellcheck="false" oninput="fileDirty()">${esc(FILE.text)}</textarea>
-      <div class="ffoot"><span id="fstate" class="why">${fsize(FILE.size || 0)}</span></div>
+      <span class="fname" title="${esc(FILE.path)}">${esc(FILE.rel || FILE.name || FILE.path)}</span>
+      ${canRender ? `<button class="sm" onclick="toggleSource()">${FILE_SRC ? "Preview" : "Edit"}</button>` : ""}
+      ${FILE.editable && (FILE_SRC || !canRender) ? `<button class="sm pri" onclick="saveFile()">Save</button>` : ""}
+      <button class="sm" onclick='reveal(${JSON.stringify(FILE.path)})'>Finder</button>
+      <button class="sm" onclick="closeFile()">Close</button>
     </div>`;
+
+            const foot = `<div class="ffoot"><span id="fstate" class="why">${fsize(FILE.size || 0)}</span></div>`;
+
+            if (FILE.loading) return void (el.innerHTML = `<div class="fhead"><span class="fname">Opening…</span></div>`);
+            if (FILE.error) return void (el.innerHTML = head + `<div class="fempty">${esc(FILE.error)}</div>`);
+
+            let body;
+            if (FILE.kind === "pdf") {
+                body = `<iframe src="${raw}" title="${esc(FILE.name)}"></iframe>`;
+            } else if (FILE.kind === "image") {
+                body = `<div class="fread" style="max-width:none"><img src="${raw}" alt="${esc(FILE.name)}"></div>`;
+            } else if (!FILE.editable) {
+                /* Office formats and anything else the browser cannot render.
+                   Saying so plainly and offering the real application beats a
+                   blank frame that looks broken. */
+                body = `<div class="fempty">${esc(FILE.reason || "cannot be shown here")}.
+          ${fsize(FILE.size || 0)}.<br><br>
+          <button class="sm" onclick='reveal(${JSON.stringify(FILE.path)})'>Show in Finder</button></div>`;
+            } else if (canRender && !FILE_SRC) {
+                body = isMd
+                    ? `<div class="fread">${md(FILE.text)}</div>`
+                    : `<iframe src="${raw}" title="${esc(FILE.name)}" sandbox="allow-same-origin"></iframe>`;
+            } else {
+                body = `<textarea class="fedit" id="fedit" spellcheck="false" oninput="fileDirty()">${esc(FILE.text)}</textarea>`;
+            }
+            el.innerHTML = head + `<div class="fbody2">${body}</div>` + foot;
+            const ta = document.getElementById("fedit");
+            if (ta && FILE_SRC) ta.focus();
         }
 
         function projectView() {
@@ -2247,8 +2383,84 @@
         };
         document.getElementById("chattoggle").onclick = () => {
             document.querySelector(".app").classList.toggle("nochat");
+            saveLayout();
         };
 
+        /* ---- resizable panels ----
+           Column widths live in CSS variables, so a drag writes one property
+           and the browser does the rest. They are saved, because a layout you
+           have to rebuild every morning is one you stop adjusting.
+
+           Minimums are enforced here rather than in CSS: a panel dragged to
+           40px is not a small panel, it is a panel you have lost, and the
+           handle to recover it is 40px wide. */
+        const LAYOUT_KEY = "hiveframe.layout";
+        const LIMITS = { rail: [200, 460], prev: [320, 1100], chat: [300, 720] };
+        let LAYOUT = { rail: 290, prev: 560, chat: 380, chatOpen: true };
+
+        function applyLayout() {
+            const app = document.getElementById("app");
+            app.style.setProperty("--w-rail", LAYOUT.rail + "px");
+            app.style.setProperty("--w-chat", LAYOUT.chat + "px");
+            if (!app.classList.contains("noprev"))
+                app.style.setProperty("--w-prev", LAYOUT.prev + "px");
+            app.classList.toggle("nochat", !LAYOUT.chatOpen);
+        }
+
+        function saveLayout() {
+            LAYOUT.chatOpen = !document.getElementById("app").classList.contains("nochat");
+            try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(LAYOUT)); } catch (e) { }
+        }
+
+        function loadLayout() {
+            try {
+                const s = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
+                ["rail", "prev", "chat"].forEach(k => {
+                    if (typeof s[k] === "number") {
+                        const [lo, hi] = LIMITS[k];
+                        LAYOUT[k] = Math.min(hi, Math.max(lo, s[k]));
+                    }
+                });
+                if (typeof s.chatOpen === "boolean") LAYOUT.chatOpen = s.chatOpen;
+            } catch (e) { }
+            applyLayout();
+        }
+
+        document.querySelectorAll(".gutter").forEach(g => {
+            g.addEventListener("pointerdown", ev => {
+                const key = g.dataset.drag;
+                const app = document.getElementById("app");
+                const start = ev.clientX;
+                const from = LAYOUT[key];
+                /* The rail grows to the right, the other two grow to the left,
+                   because they sit on the far side of the handle. */
+                const dir = key === "rail" ? 1 : -1;
+                const [lo, hi] = LIMITS[key];
+
+                g.classList.add("dragging");
+                document.body.classList.add("dragging");
+                g.setPointerCapture(ev.pointerId);
+
+                const move = e => {
+                    const w = Math.min(hi, Math.max(lo, from + dir * (e.clientX - start)));
+                    LAYOUT[key] = w;
+                    app.style.setProperty("--w-" + key, w + "px");
+                };
+                const up = e => {
+                    g.releasePointerCapture(ev.pointerId);
+                    g.classList.remove("dragging");
+                    document.body.classList.remove("dragging");
+                    g.removeEventListener("pointermove", move);
+                    g.removeEventListener("pointerup", up);
+                    saveLayout();
+                };
+                g.addEventListener("pointermove", move);
+                g.addEventListener("pointerup", up);
+                ev.preventDefault();
+            });
+        });
+
+        loadLayout();
         paint(); load(); loadChat();
     </script>
 </body>

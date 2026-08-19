@@ -62,6 +62,49 @@ EDITABLE_SUFFIXES = {".md", ".txt", ".toml", ".json", ".yaml", ".yml", ".csv",
 # starts being a way to lose the end of a file.
 EDIT_MAX_BYTES = 512 * 1024
 
+# How a file is shown. The server decides once and the page obeys, rather than
+# both of them guessing from the extension and drifting apart.
+#
+# "office" is honest rather than clever. A browser cannot render .pptx or .docx
+# without either a conversion step or shipping the file to a cloud viewer, and
+# neither belongs in a local tool holding KP material. Those open in the real
+# application, one click away.
+PREVIEW_KINDS = {
+    ".pdf": ("pdf", "application/pdf"),
+    ".png": ("image", "image/png"),
+    ".jpg": ("image", "image/jpeg"),
+    ".jpeg": ("image", "image/jpeg"),
+    ".gif": ("image", "image/gif"),
+    ".webp": ("image", "image/webp"),
+    ".svg": ("image", "image/svg+xml"),
+    ".heic": ("image", "image/heic"),
+    ".pptx": ("office", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+    ".ppt": ("office", "application/vnd.ms-powerpoint"),
+    ".docx": ("office", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    ".doc": ("office", "application/msword"),
+    ".xlsx": ("office", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    ".xls": ("office", "application/vnd.ms-excel"),
+}
+# A PDF or image is streamed to the page, so it has a ceiling of its own. This
+# is a local socket, but a 400 MB video would still wedge the tab.
+RAW_MAX_BYTES = 64 * 1024 * 1024
+
+
+def preview_kind(path: Path) -> tuple[str, str]:
+    """How to show this file, and its content type.
+
+    Returns one of: text (editable), html (renders and edits), pdf, image,
+    office (open elsewhere), or none (nothing sensible to show).
+    """
+    suffix = path.suffix.lower()
+    if suffix in (".html", ".htm"):
+        return "html", "text/html; charset=utf-8"
+    if suffix in PREVIEW_KINDS:
+        return PREVIEW_KINDS[suffix]
+    if suffix in EDITABLE_SUFFIXES:
+        return "text", "text/plain; charset=utf-8"
+    return "none", "application/octet-stream"
+
 
 def vpn_state() -> dict:
     """Whether internal systems are reachable right now.
@@ -254,7 +297,9 @@ class Handler(BaseHTTPRequestHandler):
                 entries = entries[:TREE_MAX_ENTRIES]
             node["children"] = [self._tree_node(child, depth + 1, base) for child in entries]
         else:
-            node["editable"] = path.suffix.lower() in EDITABLE_SUFFIXES
+            kind, _ctype = preview_kind(path)
+            node["preview"] = kind
+            node["editable"] = kind in ("text", "html")
             try:
                 node["size"] = path.stat().st_size
             except OSError:
@@ -405,9 +450,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 400)
 
         if u.path == "/api/file":
-            # Read one file for the preview pane. Refusals are specific, because
-            # "cannot open" with no reason is the message that makes someone
-            # stop using a feature.
+            # Metadata plus, for text, the text itself. Binary formats are not
+            # returned here; the page asks /api/raw for those, because base64
+            # in a JSON envelope is a third larger and buys nothing.
             try:
                 path, root = self._resolve_in_roots(Board.from_env(),
                                                     q.get("path", [""])[0])
@@ -419,20 +464,69 @@ class Handler(BaseHTTPRequestHandler):
                 size = path.stat().st_size
             except OSError as e:
                 return self._json({"error": str(e)}, 400)
+            kind, ctype = preview_kind(path)
             meta = {"path": str(path), "name": path.name,
-                    "rel": str(path.relative_to(root)), "size": size}
-            if path.suffix.lower() not in EDITABLE_SUFFIXES:
+                    "rel": str(path.relative_to(root)), "size": size,
+                    "kind": kind, "content_type": ctype}
+
+            if kind in ("pdf", "image"):
+                if size > RAW_MAX_BYTES:
+                    return self._json({**meta, "kind": "none", "editable": False,
+                                       "reason": f"{size} bytes, too large to show here"})
+                return self._json({**meta, "editable": False})
+
+            if kind == "office":
                 return self._json({**meta, "editable": False,
-                                   "reason": "not a text file HiveFrame edits"})
+                                   "reason": "PowerPoint, Word and Excel files "
+                                             "open in their own application"})
+
+            if kind == "none":
+                return self._json({**meta, "editable": False,
+                                   "reason": "not a format HiveFrame can show"})
+
+            # text and html: both are read as text and both are editable.
             if size > EDIT_MAX_BYTES:
                 return self._json({**meta, "editable": False,
                                    "reason": f"{size} bytes, too large to edit here"})
             try:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as e:
-                return self._json({**meta, "editable": False,
+                return self._json({**meta, "kind": "none", "editable": False,
                                    "reason": f"cannot read as text: {e}"})
             return self._json({**meta, "editable": True, "text": text})
+
+        if u.path == "/api/raw":
+            # The bytes, for a PDF, an image, or an HTML page being rendered.
+            # Same fence as /api/file: resolve first, then require the result to
+            # sit inside a declared folder.
+            try:
+                path, _root = self._resolve_in_roots(Board.from_env(),
+                                                     q.get("path", [""])[0])
+            except StoreError as e:
+                return self._json({"error": str(e)}, 400)
+            if not path.is_file():
+                return self._json({"error": "not a file"}, 404)
+            kind, ctype = preview_kind(path)
+            if kind == "none":
+                return self._json({"error": "not a format HiveFrame can show"}, 400)
+            try:
+                blob = path.read_bytes()
+            except OSError as e:
+                return self._json({"error": str(e)}, 400)
+            if len(blob) > RAW_MAX_BYTES:
+                return self._json({"error": "file is too large to show here"}, 413)
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(blob)))
+            # Inline, so it renders in the panel instead of downloading. The
+            # filename is quoted because a real one contains spaces.
+            self.send_header("Content-Disposition",
+                             f'inline; filename="{path.name}"')
+            # A local page reading a local file. No embedding anywhere else.
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
+            self.end_headers()
+            self.wfile.write(blob)
+            return
 
         if u.path == "/api/chat/state":
             # Whether chat is usable at all, and this store's turn log. Cheap:
