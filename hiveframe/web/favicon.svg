@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- HiveFrame. The hive cell from the brand mark, hollowed into a frame.
+
+       Two shapes, not one: at 16px a solid hexagon is a blob, and the ring
+       keeps a readable silhouette. The dark plate behind it is there because a
+       browser tab can be light or dark and an amber mark on white disappears.
+
+       Colours are the app's own tokens (--bg #0f1115, --acc #f2b134), written
+       out because an SVG loaded as a favicon gets no stylesheet. -->
+  <rect width="32" height="32" rx="7" fill="#0f1115"/>
+  <path fill="#f2b134" fill-rule="evenodd"
+        d="M16 3 L28 9 L28 23 L16 29 L4 23 L4 9 Z
+           M16 9.5 L22.5 12.75 L22.5 19.25 L16 22.5 L9.5 19.25 L9.5 12.75 Z"/>
+</svg>

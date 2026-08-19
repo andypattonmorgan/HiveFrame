@@ -425,6 +425,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path in ("/", "/index.html"):
             return self._file(WEB / "index.html")
 
+        if u.path == "/favicon.svg":
+            return self._file(WEB / "favicon.svg")
+
         if u.path == "/api/board":
             stores = tuple(q.get("stores", ["work"])[0].split(","))
             try:
