@@ -1152,6 +1152,37 @@
             gap: 8px
         }
 
+        /* Drag by the header. The body holds a text box and buttons, so making
+           the whole panel a drag handle would fight every click in it. */
+        #fdrag {
+            cursor: grab
+        }
+
+        #fdrag.dragging {
+            cursor: grabbing
+        }
+
+        /* In its own window the panel is the whole document, so the floating
+           chrome is wrong: no shadow, no rounding, no drag, and it fills. */
+        body.pip .focus {
+            position: static;
+            width: auto;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            height: 100vh
+        }
+
+        body.pip #fdrag {
+            cursor: default
+        }
+
+        body.pip #fpop,
+        body.pip #fhome,
+        body.pip #fold {
+            display: none
+        }
+
         .fhead b {
             font-size: 12.5px;
             letter-spacing: .05em;
@@ -1329,9 +1360,12 @@
     </div>
 
     <div class="focus" id="focus">
-        <div class="fhead">
+        <div class="fhead" id="fdrag">
             <i class="hex" style="width:12px;height:14px"></i>
             <b>Focus</b>
+            <span class="spacer"></span>
+            <button class="mini" id="fpop" title="Move this into its own always-on-top window">Pop out</button>
+            <button class="mini" id="fhome" title="Move it back to the bottom left of the page">Reset spot</button>
             <button class="mini" id="fold">-</button>
         </div>
         <div class="fbody">
@@ -2536,6 +2570,7 @@
 
   <div class="card">
     <h2>Next moves<span class="toolbar">
+      <button class="sm" onclick="focusProject()" title="Point the focus timer at this project">Focus project</button>
       <button class="sm" onclick="toggleAdd()">Add</button></span></h2>
 
     <div id="addbox" style="display:none;margin-bottom:14px">
@@ -2569,7 +2604,8 @@
             </select>`
                             : esc(t.status)}</td>
         <td>${t.status === "open" || t.status === "doing"
-                            ? `<button class="vb" onclick="briefTask('${t.id}')" title="Load a draft instruction into chat">Ask</button>
+                            ? `<button class="vb" onclick="focusTask('${t.id}')" title="Point the focus timer at this">Focus</button>
+               <button class="vb" onclick="briefTask('${t.id}')" title="Load a draft instruction into chat">Ask</button>
                <button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>` : ""}</td>
       </tr>`).join("")}
     </table>
@@ -2846,6 +2882,33 @@
             document.getElementById("ctx").textContent = c.t.title + " · " + c.p.name;
             if (c.p.id !== SEL) pick(c.p.id);
         }
+
+        /* Focus anything, not only what was offered.
+           The three candidates are a suggestion from the ranking, and the
+           ranking does not know what you were just asked to do in a corridor.
+           A timer you cannot point at the real thing gets used once. */
+        function focusTask(id) {
+            const p = proj(SEL);
+            const t = (p.tasks || []).find(x => x.id === id);
+            if (!t) return;
+            task = { p, t };
+            document.getElementById("ctx").textContent = t.title + " · " + p.name;
+            document.getElementById("cands").innerHTML =
+                `<div class="why">Focused by hand. <span class="lnk" onclick="drawCandidates()">Show suggestions</span></div>`;
+        }
+
+        /* A project rather than a task, for work that has no card yet. Captures
+           file under the project with no task id, which is honest: it says the
+           hour went here without inventing a task to hang it on. */
+        function focusProject() {
+            const p = proj(SEL);
+            if (!p) return;
+            task = { p, t: { id: "", title: p.name } };
+            document.getElementById("ctx").textContent = p.name + " · whole project";
+            document.getElementById("cands").innerHTML =
+                `<div class="why">Focused by hand. <span class="lnk" onclick="drawCandidates()">Show suggestions</span></div>`;
+        }
+
         function fmt(s) { return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); }
         function paint() { document.getElementById("clock").textContent = fmt(left); }
         document.getElementById("go").onclick = () => {
@@ -2869,6 +2932,101 @@
             f.classList.toggle("collapsed");
             document.getElementById("fold").textContent = f.classList.contains("collapsed") ? "+" : "-";
         };
+
+        /* ---- moving the focus panel ----
+           It floats over the page, so wherever it is parked it is in front of
+           something. Three answers, in order of how far you want it to go:
+           drag it, pop it into its own always-on-top window, or put it back.
+
+           Dragging writes left and top and clears the bottom anchor, because a
+           panel pinned to two opposite edges cannot move. The spot is saved,
+           and clamped on load, so a panel dragged to a corner of a wide display
+           does not come back off-screen on a laptop. */
+        const SPOT_KEY = "hiveframe.focusspot";
+
+        function placeFocus(x, y) {
+            const f = document.getElementById("focus");
+            const w = f.offsetWidth || 274, h = f.offsetHeight || 200;
+            x = Math.min(Math.max(0, x), Math.max(0, innerWidth - w));
+            y = Math.min(Math.max(0, y), Math.max(0, innerHeight - h));
+            f.style.left = x + "px";
+            f.style.top = y + "px";
+            f.style.bottom = "auto";
+            return { x, y };
+        }
+
+        function loadSpot() {
+            try {
+                const s = JSON.parse(localStorage.getItem(SPOT_KEY) || "null");
+                if (s) placeFocus(s.x, s.y);
+            } catch (e) { }
+        }
+
+        function homeFocus() {
+            const f = document.getElementById("focus");
+            f.style.left = "16px"; f.style.top = "auto"; f.style.bottom = "16px";
+            try { localStorage.removeItem(SPOT_KEY); } catch (e) { }
+        }
+        document.getElementById("fhome").onclick = homeFocus;
+
+        document.getElementById("fdrag").addEventListener("pointerdown", ev => {
+            /* Not from a button. The header carries three of them. */
+            if (ev.target.closest("button")) return;
+            const f = document.getElementById("focus");
+            const g = ev.currentTarget;
+            const r = f.getBoundingClientRect();
+            const dx = ev.clientX - r.left, dy = ev.clientY - r.top;
+            g.classList.add("dragging");
+            g.setPointerCapture(ev.pointerId);
+            const move = e => placeFocus(e.clientX - dx, e.clientY - dy);
+            const up = e => {
+                g.releasePointerCapture(ev.pointerId);
+                g.classList.remove("dragging");
+                g.removeEventListener("pointermove", move);
+                g.removeEventListener("pointerup", up);
+                const at = placeFocus(e.clientX - dx, e.clientY - dy);
+                try { localStorage.setItem(SPOT_KEY, JSON.stringify(at)); } catch (e2) { }
+            };
+            g.addEventListener("pointermove", move);
+            g.addEventListener("pointerup", up);
+            ev.preventDefault();
+        });
+
+        /* Pop out moves the node itself into a document picture-in-picture
+           window, which floats above other applications. The node moves rather
+           than being copied, so the timer keeps running and every handler keeps
+           working; a copy would need its own state and the two would drift.
+           Closing the window moves it straight back.
+
+           Feature-detected. Where the browser does not support it the button is
+           removed rather than left to fail on click. */
+        async function popFocus() {
+            if (!window.documentPictureInPicture) return;
+            const f = document.getElementById("focus");
+            const w = await documentPictureInPicture.requestWindow({ width: 300, height: 420 });
+            [...document.styleSheets].forEach(ss => {
+                try {
+                    const css = [...ss.cssRules].map(r => r.cssText).join("");
+                    const el = w.document.createElement("style");
+                    el.textContent = css;
+                    w.document.head.appendChild(el);
+                } catch (e) { /* cross-origin sheet, nothing to copy */ }
+            });
+            w.document.body.classList.add("pip");
+            w.document.body.appendChild(f);
+            w.addEventListener("pagehide", () => {
+                document.body.appendChild(f);
+                homeFocus();
+                loadSpot();
+            });
+        }
+
+        if (window.documentPictureInPicture) document.getElementById("fpop").onclick = popFocus;
+        else document.getElementById("fpop").remove();
+
+        loadSpot();
+        /* A window resized smaller can leave the panel outside it. */
+        addEventListener("resize", loadSpot);
         document.getElementById("capture").addEventListener("keydown", async e => {
             if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
