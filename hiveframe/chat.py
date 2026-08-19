@@ -303,10 +303,10 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
     sent = prompt
     if context.strip():
         sent = (
-            "Context from the HiveFrame UI, which the user did not type:\n"
-            f"{context.strip()}\n\n"
-            "Answer this, using that context only where it is relevant:\n"
-            f"{prompt}"
+            # Terse framing on purpose: this wrapper is paid for on every
+            # turn, and the labels only need to separate the two blocks.
+            f"[screen, not typed]\n{context.strip()}\n\n"
+            f"[request]\n{prompt}"
         )
 
     argv = _build_argv(state, sent, dirs, model)
@@ -493,10 +493,10 @@ def ask_stream(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
     sent = prompt
     if context.strip():
         sent = (
-            "Context from the HiveFrame UI, which the user did not type:\n"
-            f"{context.strip()}\n\n"
-            "Answer this, using that context only where it is relevant:\n"
-            f"{prompt}"
+            # Terse framing on purpose: this wrapper is paid for on every
+            # turn, and the labels only need to separate the two blocks.
+            f"[screen, not typed]\n{context.strip()}\n\n"
+            f"[request]\n{prompt}"
         )
 
     argv = _build_argv(state, sent, dirs, model)
