@@ -247,6 +247,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype + "; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        # This is a local dev server and every file it serves is one you are
+        # editing. A cached favicon or stylesheet that survives an edit is time
+        # spent wondering why a change did nothing.
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -425,8 +429,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path in ("/", "/index.html"):
             return self._file(WEB / "index.html")
 
-        if u.path == "/favicon.svg":
+        # Browsers ask for /favicon.ico on their own, whatever the page links
+        # to. Answering that request with the SVG is better than a 404: a
+        # browser that got a 404 once will keep showing the blank page icon.
+        if u.path in ("/favicon.svg", "/favicon.ico"):
             return self._file(WEB / "favicon.svg")
+
 
         if u.path == "/api/board":
             stores = tuple(q.get("stores", ["work"])[0].split(","))
@@ -835,6 +843,20 @@ def selftest() -> int:
             pass
     print(f"  file preview is fenced to {len(roots)} declared folder(s); "
           "traversal and outside paths refused")
+
+    # The favicon is XML. A browser refuses a malformed one silently, and the
+    # server still answers 200, so only a parse proves it will render.
+    import xml.etree.ElementTree as _ET
+    _ico = WEB / "favicon.svg"
+    if not _ico.exists():
+        print("  FAIL: web/favicon.svg is missing")
+        return 1
+    try:
+        _ET.parse(_ico)
+    except _ET.ParseError as exc:
+        print(f"  FAIL: web/favicon.svg is not well-formed XML: {exc}")
+        return 1
+    print("  favicon.svg parses as XML")
 
     # A block must not demote a project that still has a move available.
     probe = replace(projects[0], status="blocked")

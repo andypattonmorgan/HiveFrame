@@ -1100,7 +1100,32 @@
             display: flex;
             gap: 7px;
             align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-end;
             margin-left: auto
+        }
+
+        /* A filter group reads as one control, so the buttons sit tight together
+           and are separated from the actions beside them. */
+        .fgroup {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            padding-right: 7px;
+            margin-right: 2px;
+            border-right: 1px solid var(--line)
+        }
+
+        .fgroup .sm .why {
+            margin-left: 4px;
+            font-size: 10.5px
+        }
+
+        /* The count on the selected button sits on the accent fill, where the
+           faint grey used elsewhere is unreadable. */
+        .fgroup .sm.pri .why {
+            color: #0f1115;
+            opacity: .72
         }
 
         .sm {
@@ -1474,6 +1499,48 @@
                 n += 1; TNUM[t.id] = n; TIDX[n] = t;
             });
             return n;
+        }
+
+        /* Which statuses the moves table shows.
+
+           Filtering is display only. Numbering, blocker resolution and every
+           count still run over the whole task list, because a filter that also
+           changed the numbers would make "do 3" mean something different
+           depending on a button nobody remembers pressing.
+
+           Default is every status, so opening a project hides nothing. The
+           choice is remembered, since a filter you have to set again each time
+           is one you stop using. */
+        const TFILTER_KEY = "hiveframe.taskfilter";
+        const TFILTERS = [
+            ["all", "All", null],
+            ["live", "Open", ["open", "doing"]],
+            ["doing", "Doing", ["doing"]],
+            ["done", "Done", ["done"]],
+            ["dropped", "Dropped", ["dropped"]],
+        ];
+        let TFILTER = "all";
+        try {
+            const saved = localStorage.getItem(TFILTER_KEY);
+            if (TFILTERS.some(f => f[0] === saved)) TFILTER = saved;
+        } catch (e) { }
+
+        function setTaskFilter(k) {
+            TFILTER = k;
+            try { localStorage.setItem(TFILTER_KEY, k); } catch (e) { }
+            draw();
+        }
+
+        function taskFilterMatch(t) {
+            const f = TFILTERS.find(x => x[0] === TFILTER);
+            return !f || !f[2] || f[2].includes(t.status);
+        }
+
+        /* Counts on the buttons, so an empty result reads as "none in that
+           status" rather than as a broken table. */
+        function taskFilterCount(p, k) {
+            const f = TFILTERS.find(x => x[0] === k);
+            return (p.tasks || []).filter(t => !f || !f[2] || f[2].includes(t.status)).length;
         }
 
         /* Only a blocker that is still open is a blocker.
@@ -2572,6 +2639,9 @@
             const c = p.charter;
             const esc = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
             numberTasks(p);
+            /* Numbering above runs over every task; the filter only decides what
+               is drawn, so #3 is #3 whatever is on screen. */
+            const shownTasks = (p.tasks || []).filter(taskFilterMatch);
 
             /* Charter fields are editable in place. The charter is the thing that stops
                drift, so making it hard to correct guarantees it goes stale and stops
@@ -2617,6 +2687,10 @@
 
   <div class="card">
     <h2>Next moves<span class="toolbar">
+      <span class="fgroup" title="Show only the statuses you want. Numbers and counts are unaffected.">
+      ${TFILTERS.map(([k, label]) => `<button class="sm${TFILTER === k ? " pri" : ""}"
+        onclick="setTaskFilter('${k}')">${label} <span class="why">${taskFilterCount(p, k)}</span></button>`).join("")}
+      </span>
       <button class="sm" onclick="focusProject()" title="Point the focus timer at this project">Focus project</button>
       <button class="sm" onclick="toggleAdd()">Add</button></span></h2>
 
@@ -2633,9 +2707,9 @@
         <button class="sm" onclick="toggleAdd()">Cancel</button></div>
     </div>
 
-    ${p.tasks.length ? `<table>
+    ${p.tasks.length ? (shownTasks.length ? `<table>
       <tr><th>#</th><th>Move</th><th>Due</th><th>Days left</th><th>Hours</th><th>Flags</th><th>Status</th><th></th></tr>
-      ${p.tasks.map(t => TEDIT === t.id ? `<tr class="editing"><td class="num tnum">${TNUM[t.id] || ""}</td>
+      ${shownTasks.map(t => TEDIT === t.id ? `<tr class="editing"><td class="num tnum">${TNUM[t.id] || ""}</td>
         <td colspan="7">
           <input class="ed" id="te-title" value="${esc(t.title)}"
                  placeholder="What is the move? Be specific enough to start.">
@@ -2674,8 +2748,12 @@
                <button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>` : ""}</td>
       </tr>`).join("")}
     </table>
+    ${TFILTER === "all" ? "" : `<p class="hint">Showing ${shownTasks.length} of ${p.tasks.length}.
+       Numbers are unchanged: #3 is the same move whatever this filter shows.</p>`}
     <p class="hint">Dropping asks for a reason and keeps the record. Deleting would
        remove the hours too, and make the workload look lighter than it is.</p>`
+                        : `<p class="empty">Nothing in that status. ${p.tasks.length} move(s) exist;
+       <span class="lnk" onclick="setTaskFilter('all')">show all</span>.</p>`)
                     : `<p class="empty">No moves listed. Work with no next move is work that is not moving.</p>`}
   </div>
 

@@ -1,12 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <!-- HiveFrame. The hive cell from the brand mark, hollowed into a frame.
+  <title>HiveFrame</title>
+  <!-- The hive cell from the brand mark, hollowed into a frame.
 
-       Two shapes, not one: at 16px a solid hexagon is a blob, and the ring
-       keeps a readable silhouette. The dark plate behind it is there because a
-       browser tab can be light or dark and an amber mark on white disappears.
+       A ring rather than the solid hexagon the rail uses: at 16px a filled
+       shape is a blob, and the outline keeps a silhouette you can pick out of
+       a row of tabs.
 
-       Colours are the app's own tokens (--bg #0f1115, --acc #f2b134), written
-       out because an SVG loaded as a favicon gets no stylesheet. -->
+       The dark rounded plate is there because a tab strip can be light or
+       dark, and amber on white disappears.
+
+       Colours are the app's accent and background, written as literals. An
+       SVG loaded as a favicon gets no stylesheet, so a CSS variable would
+       resolve to nothing. Note for anyone editing this comment: XML forbids a
+       double hyphen inside a comment, and writing the token names here with
+       their leading hyphens is what broke this file the first time. -->
+
   <rect width="32" height="32" rx="7" fill="#0f1115"/>
   <path fill="#f2b134" fill-rule="evenodd"
         d="M16 3 L28 9 L28 23 L16 29 L4 23 L4 9 Z
