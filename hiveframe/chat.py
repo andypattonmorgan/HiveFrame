@@ -45,8 +45,12 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
+import tempfile
+import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -380,3 +384,233 @@ def history(root: Path, limit: int = 40) -> list[dict]:
         except json.JSONDecodeError:
             continue
     return rows[-limit:]
+
+
+# ---- streaming -----------------------------------------------------------
+#
+# ask() waits for the whole answer and returns it. That is correct for a script
+# and wrong for a person: a research turn takes thirty seconds, and thirty
+# seconds of a motionless box is indistinguishable from a hang. Streaming is not
+# a cosmetic upgrade here, it is what makes the wait legible, and it is what
+# makes stopping possible at all. You cannot cancel a turn you cannot see.
+
+_RUNNING: dict[str, subprocess.Popen] = {}
+_RUNNING_LOCK = threading.Lock()
+
+
+def stop(turn_id: str) -> bool:
+    """Kill a running turn. Returns whether there was one to kill.
+
+    The whole process group, not just the CLI. Measured the difference: killing
+    only the parent left the turn running for another 36 seconds, because the
+    CLI spawns shells and language servers that inherit the stdout pipe and hold
+    it open after their parent is gone. A stop button that takes half a minute
+    is not a stop button. This is why the process is started in its own session.
+
+    Terminate first, kill only if it ignores that, because the CLI writes its
+    session id on the way out and a session id that was never written is a
+    conversation that silently forks on the next turn.
+    """
+    with _RUNNING_LOCK:
+        proc = _RUNNING.get(turn_id)
+    if proc is None or proc.poll() is not None:
+        return False
+
+    def signal_group(sig) -> None:
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (ProcessLookupError, PermissionError):
+            # Already gone, or not ours to signal. Fall back to the one
+            # handle we definitely own.
+            try:
+                proc.send_signal(sig)
+            except (ProcessLookupError, OSError):
+                pass
+
+    signal_group(signal.SIGTERM)
+    try:
+        proc.wait(timeout=4)
+    except subprocess.TimeoutExpired:
+        signal_group(signal.SIGKILL)
+    return True
+
+
+def _build_argv(state: dict, sent: str, dirs, model: str) -> list[str]:
+    argv = [state["path"], "-p", sent, "--no-color", "--log-level", "none"]
+    argv += ["--model", model or DEFAULT_MODEL]
+    for t in ALLOW_TOOLS:
+        argv += ["--allow-tool", t]
+    for t in DENY_TOOLS:
+        argv += ["--deny-tool", t]
+    for d in dirs:
+        argv += ["--add-dir", str(d)]
+    if BRAIN_DIR.exists():
+        argv += ["--add-dir", str(BRAIN_DIR)]
+    return argv
+
+
+def ask_stream(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
+               model: str = "", resume: bool = True, context: str = "",
+               project: str = "", turn_id: str = ""):
+    """Run one turn, yielding events as they arrive.
+
+    Same contract as ask(): same permissions, same per-project session, same two
+    logs written at the end. The difference is only in delivery. Events are
+    dicts with a "type": turn, step, detail, text, done, error.
+
+    Steps are emitted the moment their title line appears rather than when they
+    complete, so a slow tool call shows as activity instead of silence. Detail
+    lines follow and attach to the step already on screen.
+    """
+    prompt = (prompt or "").strip()
+    if not prompt:
+        yield {"type": "error", "error": "a prompt is required"}
+        return
+
+    state = available()
+    if not state["ok"]:
+        yield {"type": "error", "error": state["reason"]}
+        return
+
+    turn_id = turn_id or uuid.uuid4().hex[:12]
+
+    sent = prompt
+    if context.strip():
+        sent = (
+            "Context from the HiveFrame UI, which the user did not type:\n"
+            f"{context.strip()}\n\n"
+            "Answer this, using that context only where it is relevant:\n"
+            f"{prompt}"
+        )
+
+    argv = _build_argv(state, sent, dirs, model)
+    session = read_session(root, project) if resume else ""
+    if session:
+        argv.append(f"--resume={session}")
+
+    yield {"type": "turn", "id": turn_id, "model": model or DEFAULT_MODEL}
+
+    # stderr carries the session id and cost and is drained to a temp file
+    # rather than a pipe. Two pipes read from one thread deadlock the moment
+    # either buffer fills, and this one fills on any turn that does real work.
+    started = time.time()
+    err = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+    try:
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=err,
+                                text=True, bufsize=1, cwd=str(root),
+                                start_new_session=True)
+    except OSError as e:
+        err.close()
+        yield {"type": "error", "error": f"could not run copilot: {e}"}
+        return
+
+    with _RUNNING_LOCK:
+        _RUNNING[turn_id] = proc
+
+    steps: list[dict] = []
+    prose: list[str] = []
+    cur: dict | None = None
+    stopped = False
+    pending: str | None = None   # a spinner line is only a step if a detail follows
+
+    def classify(line: str):
+        """Emit for one line. Mirrors _split_steps, one line at a time."""
+        nonlocal cur, pending
+        m = _STEP_RE.match(line)
+        if m:
+            cur = {"glyph": m.group(1), "title": m.group(2), "detail": []}
+            steps.append(cur)
+            return {"type": "step", "glyph": cur["glyph"], "title": cur["title"]}
+        d = _STEP_DETAIL_RE.match(line)
+        if d:
+            if pending is not None:
+                cur = {"glyph": "·", "title": pending, "detail": []}
+                steps.append(cur)
+                pending = None
+                out = {"type": "step", "glyph": "·", "title": cur["title"]}
+                cur["detail"].append(d.group(1))
+                return out
+            if cur is not None:
+                cur["detail"].append(d.group(1))
+                return {"type": "detail", "text": d.group(1)}
+        if pending is not None:
+            prose.append(pending)
+            pending = None
+        s = _SPINNER_RE.match(line)
+        if s:
+            pending = s.group(2)
+            return None
+        if line.strip() and cur is not None:
+            cur = None
+        prose.append(line)
+        return {"type": "text", "text": line} if line.strip() else None
+
+    try:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            ev = classify(line)
+            if ev:
+                yield ev
+        proc.wait(timeout=TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        yield {"type": "error", "error": f"copilot did not answer within {TIMEOUT_S}s"}
+    finally:
+        with _RUNNING_LOCK:
+            _RUNNING.pop(turn_id, None)
+        stopped = proc.returncode is not None and proc.returncode < 0
+
+    if pending is not None:
+        prose.append(pending)
+
+    elapsed = round(time.time() - started, 1)
+    err.seek(0)
+    tail = err.read()
+    err.close()
+
+    m = _SESSION_RE.search(tail)
+    if m:
+        _session_path(root, project).write_text(m.group(1), encoding="utf-8")
+        session = m.group(1)
+
+    credits = None
+    c = _CREDITS_RE.search(tail)
+    if c:
+        try:
+            credits = float(c.group(1))
+        except ValueError:
+            credits = None
+
+    for s in steps:
+        s["detail"] = "\n".join(s["detail"]).strip()
+    answer = re.sub(r"\n{3,}", "\n\n", "\n".join(prose)).strip()
+    answer = _strip_footer(answer)
+
+    rec = {
+        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "prompt": prompt,
+        "project": project or "",
+        "context_chars": len(context or ""),
+        "answer_chars": len(answer),
+        "session": session,
+        "model": model or DEFAULT_MODEL,
+        "seconds": elapsed,
+        "credits": credits,
+        "exit": proc.returncode,
+        "stopped": stopped,
+    }
+    with (root / CHAT_LOG).open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+    # A stopped turn is still written. It was still asked, it still cost
+    # something, and a transcript that quietly omits the turns you abandoned is
+    # a flattering record rather than a true one.
+    with _transcript_path(root, project).open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"role": "user", "at": rec["at"], "text": prompt}) + "\n")
+        fh.write(json.dumps({
+            "role": "assistant", "at": rec["at"], "text": answer, "steps": steps,
+            "model": rec["model"], "credits": credits, "seconds": elapsed,
+            "stopped": stopped,
+        }) + "\n")
+
+    yield {"type": "done", "answer": answer, "steps": steps, **rec}

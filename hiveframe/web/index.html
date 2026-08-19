@@ -681,12 +681,16 @@
             flex: none
         }
 
-        /* ---- focus ---- */
+        /* ---- focus ----
+           Bottom left, not bottom right. The chat rail owns the right edge now,
+           and a floating timer parked on top of the conversation makes the thing
+           you are reading unreachable. The left rail is board navigation, which
+           you glance at rather than read, so an overlay costs less there. */
         .focus {
             position: fixed;
-            right: 22px;
-            bottom: 22px;
-            width: 310px;
+            left: 16px;
+            bottom: 16px;
+            width: 274px;
             background: var(--panel);
             border: 1px solid var(--line);
             border-radius: 12px;
@@ -857,6 +861,7 @@
                 <textarea id="cprompt" rows="3" placeholder="Ask about what you are looking at. Enter to send."></textarea>
                 <div class="row" style="margin-top:7px;align-items:center;gap:8px">
                     <button id="csend">Send</button>
+                    <button id="cstop" class="mini" style="display:none">Stop</button>
                     <select id="cmodel" title="Heavier models cost more per turn"></select>
                     <span class="why" id="cstat"></span>
                 </div>
@@ -1154,37 +1159,124 @@
             return d;
         }
 
+        /* One turn, streamed.
+
+           The answer is rendered twice on purpose: as plain text while it
+           arrives, because markdown is only parseable once a block is closed and
+           a half-parsed table flickers, then as markdown once "done" lands. The
+           step list is live, since a slow tool call is exactly the moment you
+           want evidence that something is happening. */
+        let RUN = null;   // the turn id currently in flight, or null
+
+        function chatBusy(on) {
+            document.getElementById("csend").disabled = on;
+            document.getElementById("cstop").style.display = on ? "" : "none";
+            document.getElementById("cstat").textContent = on ? "Working..." : "";
+        }
+
+        async function stopChat() {
+            if (!RUN) return;
+            document.getElementById("cstat").textContent = "Stopping...";
+            await fetch("/api/chat/stop", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: RUN, store: "work" })
+            });
+        }
+
         async function sendChat() {
             const box = document.getElementById("cprompt");
             const v = (box.value || "").trim();
-            if (!v || !CHAT || !CHAT.cli.ok) return;
+            if (!v || !CHAT || !CHAT.cli.ok || RUN) return;
             box.value = "";
-            const node = addTurn(v, "Thinking. The CLI runs real tools, so this is seconds.", "");
-            document.getElementById("cstat").textContent = "Running...";
-            const r = await fetch("/api/chat", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    prompt: v, store: "work", context: screenContext(),
-                    project: SEL || "", model: document.getElementById("cmodel").value
-                })
-            });
-            const d = await r.json();
-            if (d.error) {
-                node.querySelector(".a").textContent = d.error;
-                document.getElementById("cstat").textContent = "Failed";
+
+            const node = addTurn(v, "", "");
+            const aEl = node.querySelector(".a");
+            const stepBox = document.createElement("div");
+            stepBox.className = "steps";
+            node.querySelector(".q").insertAdjacentElement("afterend", stepBox);
+            const scroll = document.getElementById("cscroll");
+            const atBottom = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 60;
+            let text = "", last = null, stick = true;
+            chatBusy(true);
+
+            let r;
+            try {
+                r = await fetch("/api/chat/stream", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        prompt: v, store: "work", context: screenContext(),
+                        project: SEL || "", model: document.getElementById("cmodel").value
+                    })
+                });
+            } catch (e) {
+                aEl.textContent = "Could not reach HiveFrame: " + e;
+                chatBusy(false);
                 return;
             }
-            node.querySelector(".a").innerHTML = md(d.answer);
-            if (d.steps && d.steps.length) {
-                node.querySelector(".q").insertAdjacentHTML("afterend", stepsHtml(d.steps));
+
+            const reader = r.body.getReader();
+            const dec = new TextDecoder();
+            let buf = "";
+
+            const handle = d => {
+                if (d.type === "turn") { RUN = d.id; return; }
+                if (d.type === "error") {
+                    aEl.textContent = d.error;
+                    document.getElementById("cstat").textContent = "Failed";
+                    return;
+                }
+                if (d.type === "step") {
+                    const bad = d.glyph === "✗" || d.glyph === "⚠";
+                    last = document.createElement("details");
+                    if (bad) last.className = "bad";
+                    last.innerHTML = `<summary>${esc(d.glyph)} ${esc(d.title)}</summary><pre></pre>`;
+                    stepBox.appendChild(last);
+                    return;
+                }
+                if (d.type === "detail" && last) {
+                    const pre = last.querySelector("pre");
+                    pre.textContent += (pre.textContent ? "\n" : "") + d.text;
+                    return;
+                }
+                if (d.type === "text") {
+                    text += (text ? "\n" : "") + d.text;
+                    aEl.textContent = text;
+                    return;
+                }
+                if (d.type === "done") {
+                    aEl.innerHTML = md(d.answer || text);
+                    stepBox.innerHTML = "";
+                    stepBox.outerHTML = stepsHtml(d.steps);
+                    const meta = document.createElement("div");
+                    meta.className = "meta";
+                    meta.textContent = `${d.seconds}s · ${d.credits ?? "?"} credits · ${d.model}` +
+                        (d.stopped ? " · stopped" : "");
+                    node.appendChild(meta);
+                    TURNS.push(d);
+                }
+            };
+
+            for (; ;) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buf += dec.decode(value, { stream: true });
+                // Events are newline delimited and a read can split one in half,
+                // so the trailing fragment is kept for the next chunk.
+                const parts = buf.split("\n");
+                buf = parts.pop();
+                stick = atBottom();
+                for (const line of parts) {
+                    if (!line.trim()) continue;
+                    try { handle(JSON.parse(line)); } catch (e) { /* partial or noise */ }
+                }
+                // Only auto-scroll if you were already at the bottom. Yanking the
+                // view back down while someone is reading an earlier step is the
+                // most annoying thing a streaming UI can do.
+                if (stick) scroll.scrollTop = scroll.scrollHeight;
             }
-            const meta = document.createElement("div");
-            meta.className = "meta";
-            meta.textContent = `${d.seconds}s · ${d.credits ?? "?"} credits · ${d.model}`;
-            node.appendChild(meta);
-            document.getElementById("cscroll").scrollTop = 1e9;
-            document.getElementById("cstat").textContent = "";
-            TURNS.push(d);
+
+            RUN = null;
+            chatBusy(false);
             paintCtx();
         }
 
@@ -1749,6 +1841,7 @@
         /* Chat controls are bound once, because the rail is markup rather than a
            re-rendered string. That is most of the reason it is a rail. */
         document.getElementById("csend").onclick = sendChat;
+        document.getElementById("cstop").onclick = stopChat;
         document.getElementById("cprompt").addEventListener("keydown", e => {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
         });

@@ -280,7 +280,51 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/chat":
             return self._chat(board, store, root, data)
 
+        if u.path == "/api/chat/stream":
+            return self._chat_stream(board, store, root, data)
+
+        if u.path == "/api/chat/stop":
+            stopped = chatmod.stop(data.get("id", ""))
+            return self._json({"ok": True, "stopped": stopped})
+
         self._json({"error": "not found"}, 404)
+
+    def _chat_dirs(self, root):
+        dirs = [root]
+        repo = Path(__file__).resolve().parent.parent
+        if repo not in dirs:
+            dirs.append(repo)
+        return tuple(dirs)
+
+    def _chat_stream(self, board, store, root, data):
+        """The same turn as /api/chat, delivered as it happens.
+
+        Newline-delimited JSON rather than server-sent events, because SSE is a
+        GET-only API in the browser and a prompt does not belong in a URL. The
+        client reads the body with a stream reader, which costs a few more lines
+        there and keeps the prompt in the body where it belongs.
+
+        Flushed per event. Buffering a stream defeats the only reason it exists.
+        """
+        project = data.get("project", "")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            for ev in chatmod.ask_stream(data.get("prompt", ""), root,
+                                         dirs=self._chat_dirs(root),
+                                         model=data.get("model", ""),
+                                         context=data.get("context", ""),
+                                         project=project):
+                self.wfile.write((json.dumps(ev) + "\n").encode("utf-8"))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            # You closed the tab or navigated away. The turn is already being
+            # cleaned up by ask_stream's own finally, so there is nothing to
+            # report and nobody left to report it to.
+            pass
 
     def _chat(self, board, store, root, data):
         """One turn against the Copilot CLI.
@@ -295,13 +339,9 @@ class Handler(BaseHTTPRequestHandler):
             chatmod.clear_session(root, project)
             return self._json({"ok": True, "reset": True})
 
-        dirs = [root]
-        repo = Path(__file__).resolve().parent.parent
-        if repo not in dirs:
-            dirs.append(repo)
         try:
             answer = chatmod.ask(data.get("prompt", ""), root,
-                                 dirs=tuple(dirs),
+                                 dirs=self._chat_dirs(root),
                                  model=data.get("model", ""),
                                  context=data.get("context", ""),
                                  project=project)
