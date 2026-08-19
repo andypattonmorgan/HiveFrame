@@ -973,6 +973,30 @@
 
     <script>
         const HZ = { H1: "#4c9aff", H2: "#f2994a", H3: "#9b51e0" };
+
+        /* Plain-English labels for the stored field names.
+
+           The file keeps short keys because they are typed by hand and read by
+           code. The screen shows the question the field actually answers, because
+           a reader who has to be told what "kill_when" means will not fill it in.
+           One map, used by the charter rows and by the missing-field warnings, so
+           the two can never disagree. */
+        const FIELD_LABEL = {
+            problem: "What is wrong today",
+            hypothesis: "What we think will fix it",
+            goal: "What good looks like",
+            kill_when: "We stop if",
+            done_when: "We are finished when",
+            stop_when: "This ends when",
+            constraints: "Limits we work within"
+        };
+        const HZ_MEANS = {
+            H1: "Horizon 1: running the business now",
+            H2: "Horizon 2: the next one to two years",
+            H3: "Horizon 3: longer-term bets"
+        };
+        const fieldLabel = k => FIELD_LABEL[k] || k.replace(/_/g, " ");
+
         let BOARD = null, SEL = null, VIEW = "project";
 
         async function load() {
@@ -990,21 +1014,21 @@
     <div class="pitem${p.id === SEL ? " on" : ""}" onclick="pick('${p.id}')">
       <div class="pname">${p.name}</div>
       <div class="pmeta">
-        ${p.horizon ? `<span class="hz" style="background:${HZ[p.horizon] || "#555"}">${p.horizon}</span>` : ""}
+        ${p.horizon ? `<span class="hz" title="${HZ_MEANS[p.horizon] || ""}" style="background:${HZ[p.horizon] || "#555"}">${p.horizon}</span>` : ""}
         ${p.kind} · ${p.open_tasks} open${p.next_due ? ` · due ${p.next_due}` : ""}
       </div>
       <div class="pmeta">${p.stalled
-                    ? `<span class="chip" style="background:var(--stop)">no move today</span>`
+                    ? `<span class="chip" style="background:var(--stop)">nothing can start today</span>`
                     : (p.next_move ? `next: ${p.next_move.title}${p.next_move.effort_h ? ` (${p.next_move.effort_h}h)` : ""}` : "")}
       </div>
-      <div class="pscore">${p.score}</div>
+      <div class="pscore" title="Priority score">${p.score}</div>
     </div>`).join("");
 
             const v = BOARD.vpn, c = BOARD.capacity;
             document.getElementById("railfoot").innerHTML =
                 `<div><i class="dot" style="background:${v.tunnel ? "var(--ok)" : "var(--stop)"}"></i>${v.label}</div>
      <div style="margin-top:5px"><i class="dot" style="background:${c.overcommitted ? "var(--stop)" : "var(--ok)"}"></i>
-     ${c.committed_h}h committed / ${c.available_h}h in ${c.window_days}d</div>`;
+     ${c.committed_h}h promised of ${c.available_h}h free in the next ${c.window_days} days</div>`;
             document.getElementById("stamp").textContent = "Loaded " + BOARD.generated + " · read-only";
         }
 
@@ -1456,18 +1480,18 @@
             const row = p => `
     <tr>
       <td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span>
-        <div class="why">${p.why.join("; ") || "no signals"}</div>
-        ${p.charter.kill_when ? `<div class="why">Kill when: ${p.charter.kill_when}</div>`
-                    : `<div class="why gap">No kill condition stated. Nothing here can ever fail.</div>`}</td>
+        <div class="why">${p.why.join("; ") || "nothing pushing it up"}</div>
+        ${p.charter.kill_when ? `<div class="why">We stop if: ${p.charter.kill_when}</div>`
+                    : `<div class="why gap">No stopping condition written, so this can never fail and never end.</div>`}</td>
       <td class="num">${p.score}</td>
       <td class="num">${p.open_tasks}</td>
       <td class="num">${p.open_effort_h}h</td>
       <td>
         <input class="rsn" id="rsn-${p.id}" placeholder="Why. One line, required.">
         <div class="vrow">
-          <button class="vb kill" onclick="verdict('${p.id}','killed')">Kill</button>
-          <button class="vb" onclick="verdict('${p.id}','paused')">Park</button>
-          <button class="vb" onclick="verdict('${p.id}','done')">Done</button>
+          <button class="vb kill" onclick="verdict('${p.id}','killed')">Stop</button>
+          <button class="vb" onclick="verdict('${p.id}','paused')">Pause</button>
+          <button class="vb" onclick="verdict('${p.id}','done')">Finished</button>
           <button class="vb" onclick="verdict('${p.id}','active')">Keep</button>
         </div>
       </td>
@@ -1475,16 +1499,17 @@
 
             return `
   <h1>Triage</h1>
-  <p class="lede">Worst first. Kill it, park it, close it, or keep it and say why.
-     Leaving it is not one of the four.</p>
+  <p class="lede">Weakest first. Stop it, pause it, close it, or keep it and say why.
+     Leaving it alone is not one of the four.</p>
 
-  <div class="card"><h2>Live, weakest first</h2>
+  <div class="card"><h2>Running now, weakest first</h2>
     <table>
-      <tr><th>Project</th><th>Score</th><th>Open</th><th>Effort</th><th>Verdict</th></tr>
+      <tr><th>Project</th><th>Priority</th><th>Open moves</th><th>Hours left</th><th>Decision</th></tr>
       ${order.map(row).join("")}
     </table>
-    <p class="why" style="margin:10px 0 0">Every verdict rewrites one line in the
-       project's own file and appends to decisions.jsonl. Nothing else is written.</p>
+    <p class="why" style="margin:10px 0 0">Each decision changes one line in that
+       project's own file and adds a dated entry to the decision log. Nothing else
+       is written.</p>
   </div>
 
   ${rest.length ? `<div class="card"><h2>Already decided</h2>
@@ -1596,36 +1621,40 @@
 
             return `
   <h1>${p.name}</h1>
-  <p class="lede">${p.kind} · ${p.horizon || "no horizon"} · ${p.status} ·
-     score ${p.score} <span class="why">(${p.why.join("; ") || "no signals"})</span></p>
+  <p class="lede">${p.tier || "project"} · ${p.kind} ·
+     <span title="${HZ_MEANS[p.horizon] || ""}">${p.horizon || "no horizon set"}</span> · ${p.status} ·
+     priority ${p.score} <span class="why">(${p.why.join("; ") || "nothing pushing it up"})</span></p>
 
   ${treeSection(p.id)}
 
   <div class="card charter">
-    <h2>Charter${c.complete ? "" : ' <span class="gap">&nbsp;incomplete</span>'}
+    <h2>Why this exists${c.complete ? "" : ' <span class="gap">&nbsp;unfinished</span>'}
       <span class="toolbar">
-        ${EDIT ? `<button class="sm pri" onclick="saveCharter()">Save charter</button>
+        ${EDIT ? `<button class="sm pri" onclick="saveCharter()">Save</button>
                 <button class="sm" onclick="setEdit(false)">Cancel</button>`
                     : `<button class="sm" onclick="setEdit(true)">Edit</button>`}
       </span></h2>
-    ${crow("problem", "Problem", c.problem)}
-    ${crow("hypothesis", "Hypothesis", c.hypothesis)}
-    ${crow("goal", "Goal", c.goal)}
-    ${crow("kill_when", "Kill when", c.kill_when)}
-    ${crow("done_when", "Done when", c.done_when)}
+    <p class="hint">Five plain answers. If they cannot be written, the work has not
+       been agreed yet.</p>
+    ${crow("problem", fieldLabel("problem"), c.problem)}
+    ${crow("hypothesis", fieldLabel("hypothesis"), c.hypothesis)}
+    ${crow("goal", fieldLabel("goal"), c.goal)}
+    ${crow("kill_when", fieldLabel("kill_when"), c.kill_when)}
+    ${crow("done_when", fieldLabel("done_when"), c.done_when)}
+    ${c.stop_when || (EDIT && p.tier === "program") ? crow("stop_when", fieldLabel("stop_when"), c.stop_when) : ""}
     ${EDIT
-                    ? `<div class="crow"><span class="ck">Constraints</span>
+                    ? `<div class="crow"><span class="ck">${fieldLabel("constraints")}</span>
           <span><textarea class="ed" data-charter="constraints"
             placeholder="One per line">${esc(c.constraints.join("\n"))}</textarea></span></div>`
-                    : (c.constraints.length ? `<div class="crow"><span class="ck">Constraints</span>
+                    : (c.constraints.length ? `<div class="crow"><span class="ck">${fieldLabel("constraints")}</span>
           <span>${esc(c.constraints.join(", "))}</span></div>` : "")}
-    ${EDIT ? `<p class="hint">Saving rewrites the project file from the model and
-       keeps a .bak. Hand-written TOML comments are lost, so keep notes in fields.</p>`: ""}
+    ${EDIT ? `<p class="hint">Saving rewrites the project file and keeps a backup copy.
+       Notes written as comments in the file are lost, so keep them in the fields.</p>`: ""}
   </div>
 
   <div class="card">
-    <h2>Tasks<span class="toolbar">
-      <button class="sm" onclick="toggleAdd()">Add task</button></span></h2>
+    <h2>Next moves<span class="toolbar">
+      <button class="sm" onclick="toggleAdd()">Add</button></span></h2>
 
     <div id="addbox" style="display:none;margin-bottom:14px">
       <input class="ed" id="nt-title" placeholder="What is the move? Be specific enough to start.">
@@ -1641,9 +1670,9 @@
     </div>
 
     ${p.tasks.length ? `<table>
-      <tr><th>Task</th><th>Due</th><th>Left</th><th>Effort</th><th>Flags</th><th>Status</th><th></th></tr>
+      <tr><th>Move</th><th>Due</th><th>Days left</th><th>Hours</th><th>Flags</th><th>Status</th><th></th></tr>
       ${p.tasks.map(t => `<tr>
-        <td>${esc(t.title)}${t.blocked_by.length ? ` <span class="chip" style="background:var(--stop)">waits on ${t.blocked_by.join(", ")}</span>` : ""}
+        <td>${esc(t.title)}${t.blocked_by.length ? ` <span class="chip" style="background:var(--stop)">waiting on ${t.blocked_by.join(", ")}</span>` : ""}
           ${t.note ? `<div class="why">${esc(t.note)}</div>` : ""}</td>
         <td class="num">${t.due || "<span class='why'>none</span>"}</td>
         <td class="num ${t.days_left !== null && t.days_left < 0 ? "missing" : ""}">${t.days_left === null ? "" : t.days_left + "d"}</td>
@@ -1660,40 +1689,40 @@
                             ? `<button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>` : ""}</td>
       </tr>`).join("")}
     </table>
-    <p class="hint">Dropping asks for a reason and keeps the task. Deleting it would
-       take its estimate with it and quietly improve the capacity number.</p>`
-                    : `<p class="empty">No tasks. A project with no next move is a project that is not moving.</p>`}
+    <p class="hint">Dropping asks for a reason and keeps the record. Deleting would
+       remove the hours too, and make the workload look lighter than it is.</p>`
+                    : `<p class="empty">No moves listed. Work with no next move is work that is not moving.</p>`}
   </div>
 
   <div class="card">
-    <h2>Artifacts<span class="toolbar">
-      <button class="sm" onclick="toggleArt()">Add artifact</button></span></h2>
+    <h2>Deliverables<span class="toolbar">
+      <button class="sm" onclick="toggleArt()">Add</button></span></h2>
 
     <div id="artbox" style="display:none;margin-bottom:14px">
-      <input class="ed" id="na-label" placeholder="Label">
+      <input class="ed" id="na-label" placeholder="What is it called">
       <div class="grid2" style="margin-top:7px">
-        <input class="ed" id="na-path" placeholder="Absolute path, optional">
-        <input class="ed" id="na-kind" placeholder="Kind: doc, tool, page, data" value="doc">
+        <input class="ed" id="na-path" placeholder="Where it lives on disk, optional">
+        <input class="ed" id="na-kind" placeholder="Type: doc, tool, page, data" value="doc">
       </div>
       <div class="vrow"><button class="sm pri" onclick="addArtifact()">Add</button>
         <button class="sm" onclick="toggleArt()">Cancel</button></div>
     </div>
 
     ${p.artifacts.length ? `<table>
-      <tr><th>Artifact</th><th>Kind</th><th>Where</th></tr>
+      <tr><th>Deliverable</th><th>Type</th><th>Where</th></tr>
       ${p.artifacts.map(a => `<tr>
-        <td>${esc(a.label)}${a.exists || !a.path ? "" : ' <span class="chip" style="background:var(--stop)">missing</span>'}</td>
+        <td>${esc(a.label)}${a.exists || !a.path ? "" : ' <span class="chip" style="background:var(--stop)">not found</span>'}</td>
         <td>${esc(a.kind)}</td>
         <td>${a.path ? `<span class="lnk" onclick="reveal('${a.path.replace(/'/g, "\\'")}')">Reveal in Finder</span>
               <div class="mono">${esc(a.path)}</div>` : ""}
             ${a.url ? `<a class="lnk" href="${a.url}" target="_blank">Open published</a>` : ""}</td>
       </tr>`).join("")}
-    </table>`: `<p class="empty">No artifacts registered.</p>`}
+    </table>`: `<p class="empty">Nothing listed yet.</p>`}
   </div>
 
   <div class="card">
-    <h2>Relations<span class="toolbar">
-      <button class="sm" onclick="toggleRel()">Add relation</button></span></h2>
+    <h2>Links to other work<span class="toolbar">
+      <button class="sm" onclick="toggleRel()">Add link</button></span></h2>
 
     <div id="relbox" style="display:none;margin-bottom:14px">
       <div class="grid2">
@@ -1726,9 +1755,10 @@
           <button class="vb" onclick="relVerdict('${r.to}','rejected')">Reject</button>` : ""}</td>
       </tr>`).join("")}
     </table>
-    <p class="hint">A suggested relation affects nothing until confirmed. Rejected ones
-       stay on the record, so the same suggestion does not arrive next month looking new.</p>`
-                    : `<p class="empty">No relations recorded. Nothing is implicitly connected.</p>`}
+    <p class="hint">A suggested link changes nothing until it is confirmed. Rejected ones
+       stay on the record, so the same suggestion does not come back next month
+       looking new.</p>`
+                    : `<p class="empty">No links recorded. Nothing is connected unless it says so here.</p>`}
   </div>
 
   <div class="card">
@@ -1839,37 +1869,40 @@
             const c = BOARD.capacity;
             const flags = [];
             c.at_risk.forEach(r => flags.push(["var(--stop)",
-                `<b>${r.title}</b> needs ${r.effort_h}h with ${r.hours_available}h available before ${r.due}`]));
+                `<b>${r.title}</b> needs ${r.effort_h}h and only ${r.hours_available}h are free before it is due on ${r.due}`]));
             if (c.overcommitted) flags.push(["var(--stop)",
-                `Portfolio overcommitted by ${c.overcommitted_by_h}h in the next ${c.window_days} days. Something has to give.`]);
+                `More work is committed than there are hours to do it, by ${c.overcommitted_by_h}h over the next ${c.window_days} days. Something has to give.`]);
             BOARD.projects.forEach(p => {
                 p.relations.filter(r => r.status === "suggested").forEach(r =>
-                    flags.push(["var(--info)", `<b>${p.name}</b> has a suggested relation to ${r.to} awaiting a verdict`]));
+                    flags.push(["var(--info)", `<b>${p.name}</b> may be linked to ${r.to}. Confirm it or dismiss it.`]));
                 if (!p.charter.complete && p.status === "active")
-                    flags.push(["var(--warn)", `<b>${p.name}</b> charter missing: ${p.charter.missing.join(", ")}`]);
+                    flags.push(["var(--warn)",
+                        `<b>${p.name}</b> has not answered: ${p.charter.missing.map(fieldLabel).join(", ")}`]);
             });
 
             return `
   <h1>Brief</h1>
-  <p class="lede">Top five and bottom five, ranked. One decision each, then stop.</p>
+  <p class="lede">The five to push and the five to decide about. One decision each,
+     then stop.</p>
 
-  <div class="card"><h2>Flags</h2>
+  <div class="card"><h2>Needs attention</h2>
     ${flags.length ? flags.map(([col, txt]) =>
                 `<div class="flag"><i class="b" style="background:${col}"></i><span>${txt}</span></div>`).join("")
-                    : `<p class="empty">Nothing flagged.</p>`}</div>
+                    : `<p class="empty">Nothing needs attention.</p>`}</div>
 
   <div class="card"><h2>Top 5, do these</h2>
-    <table><tr><th>Project</th><th>Score</th><th>Why it ranks</th></tr>
+    <table><tr><th>Project</th><th>Priority</th><th>Why it is near the top</th></tr>
     ${top.map(p => `<tr><td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span></td>
-      <td class="num">${p.score}</td><td class="why">${p.why.join("; ") || "no signals"}</td></tr>`).join("")}
+      <td class="num">${p.score}</td><td class="why">${p.why.join("; ") || "nothing pushing it up"}</td></tr>`).join("")}
     </table></div>
 
-  <div class="card"><h2>Bottom 5, decide these</h2>
-    <table><tr><th>Project</th><th>Score</th><th>Why it sank</th></tr>
+  <div class="card"><h2>Bottom 5, decide about these</h2>
+    <table><tr><th>Project</th><th>Priority</th><th>Why it dropped</th></tr>
     ${bottom.map(p => `<tr><td><span class="lnk" onclick="pick('${p.id}')">${p.name}</span></td>
-      <td class="num">${p.score}</td><td class="why">${p.why.join("; ") || "no signals"}</td></tr>`).join("")}
+      <td class="num">${p.score}</td><td class="why">${p.why.join("; ") || "nothing pushing it up"}</td></tr>`).join("")}
     </table>
-    <p class="why" style="margin:10px 0 0">Kill it, park it with a reason, or set a date. Leaving it is not one of the three.</p>
+    <p class="why" style="margin:10px 0 0">Stop it, pause it with a reason, or give it a
+       date. Leaving it alone is not one of the three.</p>
   </div>`;
         }
 
@@ -1877,28 +1910,28 @@
             const c = BOARD.capacity;
             return `
   <h1>Capacity</h1>
-  <p class="lede">Fixed weekly budget against committed effort. Estimates start wrong;
-     logged focus sessions correct them.</p>
+  <p class="lede">The hours in the week against the hours already promised. Estimates
+     start out wrong; timed work sessions correct them.</p>
   <div class="card"><div class="bars">
-    <div class="stat"><div class="k">Available</div><div class="v">${c.available_h}h</div>
-      <div class="n">${c.weekly_hours}h/week over ${c.window_days}d</div></div>
-    <div class="stat"><div class="k">Committed</div><div class="v">${c.committed_h}h</div>
-      <div class="n">dated tasks in window</div></div>
-    <div class="stat"><div class="k">Undated</div><div class="v">${c.undated_h}h</div>
-      <div class="n">no due date, so invisible to the projection</div></div>
-    <div class="stat"><div class="k">Overcommitted</div>
+    <div class="stat"><div class="k">Hours free</div><div class="v">${c.available_h}h</div>
+      <div class="n">${c.weekly_hours}h a week over the next ${c.window_days} days${c.operations_h ? `, less ${c.operations_h}h of routine running work` : ""}</div></div>
+    <div class="stat"><div class="k">Hours promised</div><div class="v">${c.committed_h}h</div>
+      <div class="n">work with a date in this window</div></div>
+    <div class="stat"><div class="k">Not yet scheduled</div><div class="v">${c.undated_h}h</div>
+      <div class="n">no date set, so it is not in the forecast</div></div>
+    <div class="stat"><div class="k">Over-promised</div>
       <div class="v" style="color:${c.overcommitted ? "var(--stop)" : "var(--ok)"}">${c.overcommitted ? c.overcommitted_by_h + "h" : "no"}</div>
-      <div class="n">${c.overcommitted ? "something must be cut" : "fits, on current estimates"}</div></div>
+      <div class="n">${c.overcommitted ? "something has to be cut" : "it fits, on today's estimates"}</div></div>
   </div></div>
-  <div class="card"><h2>At risk</h2>
+  <div class="card"><h2>At risk of missing its date</h2>
     ${c.at_risk.length ? `<table>
-      <tr><th>Task</th><th>Project</th><th>Due</th><th>Left</th><th>Needs</th><th>Has</th></tr>
+      <tr><th>Move</th><th>Project</th><th>Due</th><th>Days left</th><th>Hours needed</th><th>Hours free</th></tr>
       ${c.at_risk.map(r => `<tr><td>${r.title}</td>
         <td><span class="lnk" onclick="pick('${r.project}')">${r.project_name}</span></td>
         <td class="num">${r.due}</td><td class="num">${r.days_left}d</td>
         <td class="num">${r.effort_h}h</td>
         <td class="num missing">${r.hours_available}h</td></tr>`).join("")}
-      </table>`: `<p class="empty">Nothing at risk on current estimates.</p>`}
+      </table>`: `<p class="empty">Nothing is at risk on today's estimates.</p>`}
   </div>`;
         }
 

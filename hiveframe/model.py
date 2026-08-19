@@ -639,24 +639,33 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
     # admin and doing the platform work, you do the admin and then decide.
     # Zero here means "not in this contest", not "unimportant".
     if project.is_operation:
-        return 0.0, ["operation, not ranked (taken off the top in capacity)"]
+        return 0.0, ["routine running work, not ranked against projects"]
 
     if project.status == "blocked":
-        why.append("blocked externally")
+        why.append("waiting on someone outside this board")
 
     nxt = project.next_actionable()
     due = nxt.due if nxt else None
+    # Read aloud, not printed. "due in 1 days" and "due in 0 days" are the two
+    # places a reader stops trusting the sentence, and "today" is the word they
+    # would have used anyway.
+    def when(d: int) -> str:
+        if d == 0:
+            return "due today"
+        return f"due in {d} day" + ("" if d == 1 else "s")
+
     if due is not None:
         days = (due - today).days
         if days < 0:
             pts += 40 + min(abs(days), 10)
-            why.append(f"overdue by {abs(days)}d")
+            n = abs(days)
+            why.append(f"{n} day{'' if n == 1 else 's'} past its date")
         elif days <= 7:
             pts += 30 - days
-            why.append(f"due in {days}d")
+            why.append(when(days))
         elif days <= 28:
             pts += 8
-            why.append(f"due in {days}d")
+            why.append(when(days))
 
     # Size is a tiebreaker, not a priority. Between two things due the same day,
     # the one that fits in a sitting is the one that gets finished, and an
@@ -664,10 +673,10 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
     if nxt is not None and due is not None and (due - today).days <= 2:
         if nxt.effort_h and nxt.effort_h <= 0.5:
             pts += 6
-            why.append(f"next move is {nxt.effort_h}h")
+            why.append(f"next step is short, {nxt.effort_h}h")
         elif nxt.effort_h >= 4:
             pts -= 4
-            why.append(f"next move is {nxt.effort_h}h, will not fit today")
+            why.append(f"next step needs {nxt.effort_h}h, too big for today")
 
     # Flags are counted on the tasks that can actually be started today. An
     # urgent task waiting on an open sibling is not urgent to me, it is urgent
@@ -679,41 +688,41 @@ def score(project: Project, today: date | None = None) -> tuple[float, list[str]
     important = [t for t in project.actionable_tasks if t.important]
     if urgent:
         pts += 20 + 6 * (len(urgent) - 1)
-        why.append(f"{len(urgent)} urgent and startable")
+        why.append(f"{len(urgent)} urgent step(s) ready to start")
     if important:
         pts += 10 + 3 * (len(important) - 1)
-        why.append(f"{len(important)} important and startable")
+        why.append(f"{len(important)} important step(s) ready to start")
 
     # An item other work waits on outranks an item nothing waits on.
     blocks = [r for r in project.confirmed_relations if r.type == "blocks"]
     if blocks:
         pts += 15 * len(blocks)
-        why.append(f"blocks {len(blocks)} other project(s)")
+        why.append(f"{len(blocks)} other project(s) are waiting on this")
 
     if project.pending_relations:
         pts += 3
-        why.append(f"{len(project.pending_relations)} relation(s) awaiting a verdict")
+        why.append(f"{len(project.pending_relations)} suggested link(s) need a yes or no")
 
     if not project.charter_complete:
         pts += 5
-        why.append("charter incomplete")
+        why.append("its purpose has not been fully written down")
 
     # A block is a reason to act, not a reason to wait. If there is a move that
     # attacks it, promote it: unblocking work releases everything downstream and
     # gets cheaper the earlier it is done.
     if project.status == "blocked" and project.actionable_tasks:
         pts += 25
-        why.append(f"{len(project.actionable_tasks)} move(s) available to unblock it")
+        why.append(f"{len(project.actionable_tasks)} step(s) available to clear the blockage")
 
     # Stalled is the honest state for any live project with open work and no
     # move available, blocked or not. Demote only enough to break a tie: it is
     # still on the board, and it still needs someone to find it a move.
     if project.stalled:
         pts -= 5
-        why.append("no move available today")
+        why.append("nothing can be started today")
 
     if not project.open_tasks:
         pts -= 10
-        why.append("no open tasks")
+        why.append("no open work left")
 
     return pts, why
