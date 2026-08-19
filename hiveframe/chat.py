@@ -7,25 +7,36 @@ terminal, and rebuilding tool access is weeks of work to duplicate something
 already installed.
 
 Posture. The CLI can edit files and run shell commands, so this module is the
-one place in HiveFrame that can reach outside a store. Three controls keep that
-honest:
+one place in HiveFrame that reaches outside a store. Four controls bound it, and
+one of them is weaker than it looks:
 
-  1. --deny-tool on every write verb by default. Read verbs are allowlisted.
-     --allow-all-tools is never passed; the CLI is invoked with an explicit
-     allowlist so a prompt cannot talk it into a write it was not granted.
-  2. --add-dir names the working directories explicitly rather than
-     --allow-all-paths, so file access is bounded to the stores and the repo.
-  3. Every turn is logged to chat.jsonl in the store with its prompt, session
-     id, duration and exit code. An assistant that acts without a record is
-     the thing this whole tool exists to argue against.
+  1. Writes are allowed. Publishing and remote history rewriting are not:
+     `git push`, `git reset` and every network verb are denied by name.
+  2. `shell(rm)` is denied, but that is not a deletion guarantee. Tested: asked
+     to delete a file, the CLI was refused `rm` and then deleted it through the
+     allowed edit tool instead. Granting write grants delete. The denial removes
+     the blunt instrument and the accidental `rm -rf`, not the capability.
+     Recovery is git, not the allowlist, which is why the repo commits after
+     every change.
+  3. --add-dir names writable directories explicitly rather than
+     --allow-all-paths. The protected shared libraries are never included.
+  4. Every turn is logged to chat.jsonl with its prompt, model, session id,
+     duration and cost. An assistant that acts without a record is the thing
+     this whole tool exists to argue against.
 
 Sessions. The CLI owns continuity. It returns a session id on first turn and
 resumes with --resume, so HiveFrame stores the id and nothing else. Conversation
 history is not duplicated here, because two copies of a transcript disagree.
 
-Cost. Every turn spends AI credits against the operator's allowance. The model
-is pinned rather than left on auto, and turns are logged with their duration so
-the spend is visible instead of inferred.
+Sessions are per project, not per store. Cost grows with conversation length
+because resume re-sends the history, and a question about one project rarely
+needs another project's thread. Switching projects therefore switches threads,
+which is both cheaper and the same separation the rest of the tool enforces.
+
+Cost. Measured on an identical one-word prompt, the cheapest model costs 1.5
+credits and the heaviest 20.8. The default is the light one and the heavy one is
+picked deliberately per turn, because a heavy model left as a default is a bill
+nobody decided to run up.
 """
 
 from __future__ import annotations
@@ -42,8 +53,7 @@ from pathlib import Path
 CHAT_LOG = "chat.jsonl"
 SESSION_FILE = ".chat_session"
 
-# Read verbs only. The CLI prompts for anything not named here, and a prompt
-# nobody is present to answer is a refusal, which is the safe failure.
+# Read verbs, always allowed without prompting.
 ALLOW_TOOLS = (
     "shell(cat)",
     "shell(ls)",
@@ -55,14 +65,15 @@ ALLOW_TOOLS = (
     "shell(git status)",
     "shell(git log)",
     "shell(git diff)",
+    "write",
 )
 
-# Named explicitly. Relying on the allowlist alone means a tool added upstream
-# arrives enabled; denying the write verbs means it arrives blocked.
+# Denied by name rather than left to the allowlist, because a tool added
+# upstream arrives enabled otherwise. These are the verbs that destroy, move,
+# or reach the network. Editing is allowed; deleting and publishing are not.
 DENY_TOOLS = (
     "shell(rm)",
     "shell(mv)",
-    "shell(cp)",
     "shell(chmod)",
     "shell(chown)",
     "shell(dd)",
@@ -71,13 +82,21 @@ DENY_TOOLS = (
     "shell(scp)",
     "shell(rsync)",
     "shell(git push)",
-    "shell(git commit)",
     "shell(git reset)",
-    "write",
 )
 
-DEFAULT_MODEL = os.environ.get("HIVEFRAME_CHAT_MODEL", "claude-sonnet-4.5")
-TIMEOUT_S = int(os.environ.get("HIVEFRAME_CHAT_TIMEOUT", "180"))
+# Cost varies about fourteen-fold across these, measured on an identical
+# one-word prompt. The default is the cheapest capable option, and the heavy
+# ones are a deliberate choice rather than a setting nobody revisits.
+MODELS = (
+    ("gpt-5.4-mini", "light", 1.5),
+    ("claude-sonnet-4.5", "standard", 2.8),
+    ("gpt-5.4", "standard", 5.0),
+    ("claude-opus-5", "heavy", 20.8),
+)
+
+DEFAULT_MODEL = os.environ.get("HIVEFRAME_CHAT_MODEL", "gpt-5.4-mini")
+TIMEOUT_S = int(os.environ.get("HIVEFRAME_CHAT_TIMEOUT", "300"))
 
 # The persona lives in one place and is composed there, so this points at it
 # rather than restating it. AGENTS.md in the store root carries the compact
@@ -110,21 +129,29 @@ def available() -> dict:
     return {"ok": True, "path": exe, "version": (out.stdout or "").strip().split("\n")[0]}
 
 
-def _session_path(root: Path) -> Path:
-    return root / SESSION_FILE
+def _session_path(root: Path, project: str = "") -> Path:
+    """One thread per project.
+
+    Resume re-sends the whole conversation, so cost grows with history. Keeping
+    a separate thread per project means switching subject also drops the history
+    that no longer applies, which is cheaper and matches the separation the rest
+    of the tool enforces.
+    """
+    safe = re.sub(r"[^a-z0-9_-]", "", (project or "board").lower())[:60] or "board"
+    return root / f"{SESSION_FILE}.{safe}"
 
 
-def read_session(root: Path) -> str:
-    p = _session_path(root)
+def read_session(root: Path, project: str = "") -> str:
+    p = _session_path(root, project)
     if not p.exists():
         return ""
     return p.read_text(encoding="utf-8").strip()
 
 
-def clear_session(root: Path) -> None:
+def clear_session(root: Path, project: str = "") -> None:
     """Start a fresh conversation. The old CLI session is not deleted, only
     forgotten here, so it stays resumable from the terminal."""
-    p = _session_path(root)
+    p = _session_path(root, project)
     if p.exists():
         p.unlink()
 
@@ -139,11 +166,13 @@ def _strip_footer(text: str) -> str:
 
 
 def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
-        model: str = "", resume: bool = True, context: str = "") -> dict:
+        model: str = "", resume: bool = True, context: str = "",
+        project: str = "") -> dict:
     """Run one turn and return the answer with its cost and provenance.
 
     root is the store directory: the session id and the turn log live there, so
-    a work conversation and a personal one never share history.
+    a work conversation and a personal one never share history. project splits
+    that further, one thread per project.
 
     context is what the UI says is on screen. It is prepended rather than
     merged into the prompt, and labelled, so the assistant can tell the
@@ -181,7 +210,7 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
     if BRAIN_DIR.exists():
         argv += ["--add-dir", str(BRAIN_DIR)]
 
-    session = read_session(root) if resume else ""
+    session = read_session(root, project) if resume else ""
     if session:
         argv.append(f"--resume={session}")
 
@@ -207,7 +236,7 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
 
     m = _SESSION_RE.search(raw)
     if m:
-        _session_path(root).write_text(m.group(1), encoding="utf-8")
+        _session_path(root, project).write_text(m.group(1), encoding="utf-8")
         session = m.group(1)
 
     credits = None
@@ -223,6 +252,7 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
     rec = {
         "at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "prompt": prompt,
+        "project": project or "",
         "context_chars": len(context or ""),
         "answer_chars": len(answer),
         "session": session,

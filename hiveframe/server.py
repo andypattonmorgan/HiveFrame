@@ -208,8 +208,10 @@ class Handler(BaseHTTPRequestHandler):
             state = chatmod.available()
             return self._json({
                 "cli": state,
-                "session": chatmod.read_session(root),
+                "session": chatmod.read_session(root, q.get("project", [""])[0]),
                 "model": chatmod.DEFAULT_MODEL,
+                "models": [{"id": m, "tier": t, "credits": c}
+                           for m, t, c in chatmod.MODELS],
                 "allow": list(chatmod.ALLOW_TOOLS),
                 "deny": list(chatmod.DENY_TOOLS),
                 "history": chatmod.history(root),
@@ -281,11 +283,14 @@ class Handler(BaseHTTPRequestHandler):
     def _chat(self, board, store, root, data):
         """One turn against the Copilot CLI.
 
-        The store decides which conversation this is: session id and turn log
-        live in the store root, so work and personal never share history.
+        The store decides which conversation this is, and the project splits it
+        further. Cost grows with conversation length because resume re-sends the
+        history, so one thread per project is a cost control as much as a
+        separation of concerns.
         """
+        project = data.get("project", "")
         if data.get("reset"):
-            chatmod.clear_session(root)
+            chatmod.clear_session(root, project)
             return self._json({"ok": True, "reset": True})
 
         dirs = [root]
@@ -296,7 +301,8 @@ class Handler(BaseHTTPRequestHandler):
             answer = chatmod.ask(data.get("prompt", ""), root,
                                  dirs=tuple(dirs),
                                  model=data.get("model", ""),
-                                 context=data.get("context", ""))
+                                 context=data.get("context", ""),
+                                 project=project)
         except ChatError as e:
             return self._json({"error": str(e)}, 400)
         return self._json({"ok": True, **answer})
@@ -496,9 +502,15 @@ def selftest() -> int:
 
     state = chatmod.available()
     print(f"  chat CLI: {state.get('version') or state.get('reason')}")
-    assert "write" in chatmod.DENY_TOOLS, "the write verb must be denied by default"
-    assert not any("--allow-all" in t for t in chatmod.ALLOW_TOOLS)
-    print("  chat denies the write verb and never allows all tools")
+    # Writes are permitted on purpose. Publishing and remote history rewriting
+    # are not, and those are the assertions that actually hold: there is no
+    # allowed path to the network. shell(rm) is asserted too, but tested
+    # behaviour is that the CLI deletes through the edit tool when refused rm,
+    # so treat that one as friction, not a boundary. Git is the recovery.
+    for verb in ("shell(rm)", "shell(git push)", "shell(curl)"):
+        assert verb in chatmod.DENY_TOOLS, f"{verb} must stay denied"
+    assert chatmod.DEFAULT_MODEL == chatmod.MODELS[0][0], "default must be the cheapest model"
+    print("  chat blocks publishing and network verbs; deletion is only slowed, not stopped")
 
     print("selftest OK")
     return 0

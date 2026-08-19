@@ -260,6 +260,16 @@
             font-size: 13px
         }
 
+        .cfoot select {
+            background: var(--panel);
+            color: var(--dim);
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            padding: 4px 6px;
+            font: inherit;
+            font-size: 11.5px
+        }
+
         .topbar {
             position: sticky;
             top: 0;
@@ -790,6 +800,7 @@
                 <textarea id="cprompt" rows="3" placeholder="Ask about what you are looking at. Enter to send."></textarea>
                 <div class="row" style="margin-top:7px;align-items:center;gap:8px">
                     <button id="csend">Send</button>
+                    <select id="cmodel" title="Heavier models cost more per turn"></select>
                     <span class="why" id="cstat"></span>
                 </div>
             </div>
@@ -852,7 +863,7 @@
             document.getElementById("stamp").textContent = "Loaded " + BOARD.generated + " · read-only";
         }
 
-        function pick(id) { SEL = id; drawRail(); draw(); paintCtx(); }
+        function pick(id) { SEL = id; drawRail(); draw(); paintCtx(); syncChatProject(); }
 
         function draw() {
             const el = document.getElementById("view");
@@ -873,7 +884,7 @@
            are looking at something. A tab makes you leave the thing you wanted to
            ask about, and by the time you arrive you are describing it from memory. */
 
-        let CHAT = null, TURNS = [];
+        let CHAT = null, TURNS = [], CHAT_PROJ = null;
 
         /* Answers are model output rendered into the page, so they are escaped.
            Trusting a generated string as HTML is how a helpful tool becomes an
@@ -923,17 +934,38 @@
 
         function paintCtx() {
             const el = document.getElementById("cctx");
-            if (!el) return;
-            if (!CHAT) return;
+            if (!el || !CHAT) return;
             if (!CHAT.cli.ok) { el.textContent = "Copilot CLI not found"; return; }
             const spent = TURNS.reduce((a, t) => a + (t.credits || 0), 0);
-            el.textContent = ctxLabel() + (spent ? ` · ${spent.toFixed(1)} credits this session` : "");
+            el.textContent = ctxLabel() + (spent ? ` · ${spent.toFixed(1)} credits today` : "");
+        }
+
+        /* Switching project switches thread.
+
+           Resume re-sends the whole conversation, so cost grows with history, and a
+           question about one project rarely needs another's. Measured: the same
+           question cost 3.5 credits fresh and 20.8 deep in a session. Dropping the
+           thread on a subject change is the single biggest lever on spend. */
+        function syncChatProject() {
+            const id = SEL || null;
+            if (CHAT_PROJ === id) return;
+            CHAT_PROJ = id;
+            const box = document.getElementById("cscroll");
+            if (!box || !CHAT || !CHAT.cli.ok) return;
+            const p = id && BOARD ? proj(id) : null;
+            box.innerHTML = `<p class="empty">${p ? "Thread for " + esc(p.name) + "." : "Board thread."}
+      Each project keeps its own conversation, because carrying one into another costs money and confuses the answer.</p>`;
         }
 
         async function loadChat() {
             const r = await fetch("/api/chat/state?store=work");
             CHAT = await r.json();
             TURNS = CHAT.history || [];
+            const sel = document.getElementById("cmodel");
+            if (sel && CHAT.models) {
+                sel.innerHTML = CHAT.models.map(m =>
+                    `<option value="${m.id}"${m.id === CHAT.model ? " selected" : ""}>${m.id} · ~${m.credits}cr</option>`).join("");
+            }
             paintCtx();
             if (!CHAT.cli.ok) {
                 document.getElementById("cscroll").innerHTML =
@@ -941,8 +973,8 @@
                 document.getElementById("csend").disabled = true;
                 return;
             }
-            document.getElementById("cscroll").innerHTML =
-                `<p class="empty">Ask about what is on screen. Read-only: it can read files and run read commands, and every write verb is denied.</p>`;
+            CHAT_PROJ = undefined;
+            syncChatProject();
         }
 
         function addTurn(q, a, meta) {
@@ -966,7 +998,10 @@
             document.getElementById("cstat").textContent = "Running...";
             const r = await fetch("/api/chat", {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt: v, store: "work", context: screenContext() })
+                body: JSON.stringify({
+                    prompt: v, store: "work", context: screenContext(),
+                    project: SEL || "", model: document.getElementById("cmodel").value
+                })
             });
             const d = await r.json();
             if (d.error) {
@@ -978,7 +1013,7 @@
             node.querySelector(".q").insertAdjacentHTML("afterend", "");
             const meta = document.createElement("div");
             meta.className = "meta";
-            meta.textContent = `${d.seconds}s · ${d.credits ?? "?"} credits`;
+            meta.textContent = `${d.seconds}s · ${d.credits ?? "?"} credits · ${d.model}`;
             node.appendChild(meta);
             document.getElementById("cscroll").scrollTop = 1e9;
             document.getElementById("cstat").textContent = "";
@@ -1553,12 +1588,11 @@
         document.getElementById("cnew").onclick = async () => {
             await fetch("/api/chat", {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ reset: true, store: "work" })
+                body: JSON.stringify({ reset: true, store: "work", project: SEL || "" })
             });
             if (CHAT) CHAT.session = "";
-            TURNS = [];
             document.getElementById("cscroll").innerHTML =
-                `<p class="empty">Fresh conversation. The previous one is still resumable from the terminal.</p>`;
+                `<p class="empty">Fresh thread. The previous one is still resumable from the terminal.</p>`;
             paintCtx();
         };
         document.getElementById("chattoggle").onclick = () => {
