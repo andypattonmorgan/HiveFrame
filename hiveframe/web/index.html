@@ -539,7 +539,60 @@
         }
 
         .tree-item {
-            padding: 2px 0
+            padding: 2px 0;
+            display: flex;
+            align-items: baseline;
+            gap: 8px
+        }
+
+        .tree-item .why {
+            font-size: 11.5px
+        }
+
+        /* File preview. Sits above the tree so the file you opened does not
+           push the tree you are browsing off the screen. */
+        .fprev {
+            border: 1px solid #1e222b;
+            border-radius: 8px;
+            background: #0f1218;
+            margin-bottom: 14px
+        }
+
+        .fhead {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 10px;
+            border-bottom: 1px solid #1e222b
+        }
+
+        .fname {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12.5px;
+            color: var(--ink);
+            word-break: break-all
+        }
+
+        textarea.fedit {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 420px;
+            resize: vertical;
+            border: 0;
+            background: #0f1218;
+            color: var(--ink);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12.5px;
+            line-height: 1.55;
+            padding: 12px;
+            outline: none;
+            tab-size: 4
+        }
+
+        .ffoot {
+            padding: 6px 10px;
+            border-top: 1px solid #1e222b
         }
 
         .tree-dir {
@@ -1032,7 +1085,15 @@
             document.getElementById("stamp").textContent = "Loaded " + BOARD.generated + " · read-only";
         }
 
-        function pick(id) { SEL = id; drawRail(); draw(); paintCtx(); syncChatProject(); }
+        /* Switching project closes the open file. Leaving it open would show one
+           project's file under another project's heading, which is precisely the
+           bleed this tool exists to stop. */
+        function pick(id) {
+            if (FILE && FILE_DIRTY && !confirm("Unsaved changes to " + (FILE.rel || FILE.name) + " will be lost. Switch anyway?")) return;
+            SEL = id; FILE = null; FILE_DIRTY = false;
+            drawRail(); draw(); paintCtx(); syncChatProject();
+        }
+
 
         function draw() {
             const el = document.getElementById("view");
@@ -1560,16 +1621,28 @@
                         ? "Tree endpoint not served. This HiveFrame process predates it; restart the server."
                         : (data.error || "tree unavailable")
                 };
-            if (VIEW === "project") draw();
+            if (VIEW === "project" && !FILE_DIRTY) draw();
             return TREE[id];
         }
 
         function treeLeaf(n) {
             const name = esc(n.name || n.path);
-            const path = esc(n.path || "");
-            const open = n.exists === false ? `<span class="gap">missing</span>` : "";
-            const size = typeof n.size === "number" ? `<span class="why">${n.size} B</span>` : "";
-            return `<div class="tree-item">${n.exists === false ? `<span class="missing">${name}</span>` : `<span class="lnk" onclick='reveal(${JSON.stringify(n.path)})'>${name}</span>`} ${open} ${size}<div class="tree-path">${path}</div></div>`;
+            const size = typeof n.size === "number" ? `<span class="why">${fsize(n.size)}</span>` : "";
+            if (n.exists === false) return `<div class="tree-item"><span class="missing">${name}</span> <span class="gap">missing</span></div>`;
+            /* Clicking opens the file here rather than in Finder. Leaving to
+               another application to read one paragraph is the context switch
+               this view exists to avoid. Finder is still one click away for
+               anything HiveFrame will not open. */
+            return `<div class="tree-item">
+                <span class="lnk" onclick='openFile(${JSON.stringify(n.path)})'>${name}</span> ${size}
+                <span class="lnk why" onclick='reveal(${JSON.stringify(n.path)})'>Finder</span>
+            </div>`;
+        }
+
+        function fsize(b) {
+            if (b < 1024) return b + " B";
+            if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " KB";
+            return (b / 1024 / 1024).toFixed(1) + " MB";
         }
 
         function treeNode(n) {
@@ -1588,18 +1661,89 @@
             const t = TREE[id];
             if (!t) {
                 loadTree(id);
-                return `<p class="empty">Loading folder…</p>`;
+                return `<div class="card"><h2>Files</h2><p class="empty">Loading…</p></div>`;
             }
-            if (t.error) return `<p class="empty">${esc(t.error)}</p>`;
+            if (t.error) return `<div class="card"><h2>Files</h2><p class="empty">${esc(t.error)}</p></div>`;
             return `
-  <h2>Folder<span class="toolbar"><button class="sm" onclick='loadTree(${JSON.stringify(id)}, true)'>Refresh</button></span></h2>
-  <p class="hint">This project's folders only. Expand to browse, click a file to reveal it in Finder.${t.note ? ` <span class="gap">${esc(t.note)}</span>` : ""}</p>
-  ${(t.roots || []).map(r => `
-    <div class="card">
-      <h2>${esc(r.label)} <span class="why">${esc(r.path)}</span></h2>
+  <div class="card">
+    <h2>Files<span class="toolbar">
+      <button class="sm" onclick='loadTree(${JSON.stringify(id)}, true)'>Refresh</button></span></h2>
+    <p class="hint">This project's folders only. Click a file to open it here.${t.note ? ` <span class="gap">${esc(t.note)}</span>` : ""}</p>
+    ${filePane()}
+    ${(t.roots || []).map(r => `
+      <h2 style="margin-top:14px">${esc(r.label)}</h2>
       ${treeNode(Object.assign({ open: true }, r.tree))}
-    </div>`).join("") || `<p class="empty">No folder declared for this project.</p>`}
+    `).join("") || `<p class="empty">No folder declared for this project.</p>`}
+  </div>
 `;
+        }
+
+        /* ---- file preview: open, edit, save ----
+           Read and write go through the server, which allows only paths inside
+           a folder this board already declares. The browser sends a path; it
+           does not get to choose what counts as reachable. */
+        let FILE = null, FILE_DIRTY = false;
+
+        async function openFile(path) {
+            if (FILE_DIRTY && !confirm("Unsaved changes will be lost. Open anyway?")) return;
+            FILE = { path, loading: true }; FILE_DIRTY = false; draw();
+            const r = await fetch("/api/file?path=" + encodeURIComponent(path));
+            const d = await r.json();
+            FILE = r.ok ? d : { path, error: d.error || "could not open" };
+            draw();
+            const ta = document.getElementById("fedit");
+            if (ta) ta.focus();
+        }
+
+        function closeFile() {
+            if (FILE_DIRTY && !confirm("Unsaved changes will be lost. Close anyway?")) return;
+            FILE = null; FILE_DIRTY = false; draw();
+        }
+
+        function fileDirty() {
+            if (FILE_DIRTY) return;
+            FILE_DIRTY = true;
+            const s = document.getElementById("fstate");
+            if (s) { s.textContent = "unsaved changes"; s.className = "gap"; }
+        }
+
+        async function saveFile() {
+            const ta = document.getElementById("fedit");
+            if (!ta || !FILE) return;
+            const s = document.getElementById("fstate");
+            if (s) { s.textContent = "saving…"; s.className = "why"; }
+            const r = await fetch("/api/file", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path: FILE.path, text: ta.value })
+            });
+            const d = await r.json();
+            if (!r.ok) { if (s) { s.textContent = d.error || "save refused"; s.className = "missing"; } return; }
+            FILE.text = ta.value; FILE_DIRTY = false;
+            if (s) { s.textContent = "saved, " + fsize(d.bytes) + ", previous version kept as .bak"; s.className = "why"; }
+            /* A project file that was just edited is the board. Reload it, or
+               the screen and the file disagree until the next refresh. */
+            if (FILE.path.endsWith(".toml")) await load();
+        }
+
+        function filePane() {
+            if (!FILE) return "";
+            if (FILE.loading) return `<div class="fprev"><p class="empty">Opening…</p></div>`;
+            const head = `<div class="fhead">
+        <span class="fname">${esc(FILE.rel || FILE.name || FILE.path)}</span>
+        <span class="toolbar">
+          ${FILE.editable ? `<button class="sm pri" onclick="saveFile()">Save</button>` : ""}
+          <button class="sm" onclick='reveal(${JSON.stringify(FILE.path)})'>Finder</button>
+          <button class="sm" onclick="closeFile()">Close</button>
+        </span></div>`;
+            if (FILE.error) return `<div class="fprev">${head}<p class="empty">${esc(FILE.error)}</p></div>`;
+            if (!FILE.editable) return `<div class="fprev">${head}
+        <p class="empty">${esc(FILE.reason || "not editable here")}. ${fsize(FILE.size || 0)}.
+        Open it in Finder instead.</p></div>`;
+            return `<div class="fprev">${head}
+      <textarea class="fedit" id="fedit" spellcheck="false" oninput="fileDirty()">${esc(FILE.text)}</textarea>
+      <div class="ffoot"><span id="fstate" class="why">${fsize(FILE.size || 0)}</span></div>
+    </div>`;
         }
 
         function projectView() {
@@ -1624,8 +1768,6 @@
   <p class="lede">${p.tier || "project"} · ${p.kind} ·
      <span title="${HZ_MEANS[p.horizon] || ""}">${p.horizon || "no horizon set"}</span> · ${p.status} ·
      priority ${p.score} <span class="why">(${p.why.join("; ") || "nothing pushing it up"})</span></p>
-
-  ${treeSection(p.id)}
 
   <div class="card charter">
     <h2>Why this exists${c.complete ? "" : ' <span class="gap">&nbsp;unfinished</span>'}
@@ -1790,7 +1932,8 @@
                     : `<p class="empty">No declared tool dependencies.</p>`}
   </div>
 
-  <div class="card"><h2>Source</h2><div class="mono">${p.source_file || ""}</div></div>`;
+  ${treeSection(p.id)}
+`;
         }
 
         function toggleUses() {

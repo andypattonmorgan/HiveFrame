@@ -46,6 +46,17 @@ TREE_SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__",
                   ".idea", ".DS_Store", "dist", "build", ".next", ".tox"}
 TREE_MAX_ENTRIES = 200
 
+# What the file preview will open and save. Editing is only offered for text a
+# person would plausibly hand-write; everything else is revealed in Finder
+# instead. The list is deliberately short, because "open anything" turns a
+# preview pane into an editor for files it has no business rewriting.
+EDITABLE_SUFFIXES = {".md", ".txt", ".toml", ".json", ".yaml", ".yml", ".csv",
+                     ".py", ".sh", ".html", ".css", ".js", ".sql", ".ini",
+                     ".cfg", ".env", ".jsonl", ".xml", ".rst"}
+# Past this, a browser textarea stops being a sensible way to edit anything and
+# starts being a way to lose the end of a file.
+EDIT_MAX_BYTES = 512 * 1024
+
 
 def vpn_state() -> dict:
     """Whether internal systems are reachable right now.
@@ -202,10 +213,20 @@ class Handler(BaseHTTPRequestHandler):
             raise StoreError("path escapes the selected root") from e
         return target
 
-    def _tree_node(self, path: Path, depth: int = 0) -> dict:
+    def _tree_node(self, path: Path, depth: int = 0, base: Path | None = None) -> dict:
+        # `rel` is what the screen shows. The absolute path is still sent,
+        # because Finder and the file endpoint need it, but a reader looking at
+        # a project's folder wants "notes/2026-08-18.md", not sixteen segments
+        # of cloud-storage prefix they cannot act on.
+        base = base or path.parent
+        try:
+            rel = str(path.relative_to(base))
+        except ValueError:
+            rel = path.name
         node = {
             "name": path.name or str(path),
             "path": str(path),
+            "rel": rel,
             "kind": "dir" if path.is_dir() else "file",
             "exists": path.exists(),
         }
@@ -226,8 +247,9 @@ class Handler(BaseHTTPRequestHandler):
                 node["truncated"] = True
                 node["hidden"] = len(entries) - TREE_MAX_ENTRIES
                 entries = entries[:TREE_MAX_ENTRIES]
-            node["children"] = [self._tree_node(child, depth + 1) for child in entries]
+            node["children"] = [self._tree_node(child, depth + 1, base) for child in entries]
         else:
+            node["editable"] = path.suffix.lower() in EDITABLE_SUFFIXES
             try:
                 node["size"] = path.stat().st_size
             except OSError:
@@ -294,6 +316,47 @@ class Handler(BaseHTTPRequestHandler):
             raise StoreError("no tree roots available")
         return {"generated": date.today().isoformat(), "roots": roots}
 
+    def _file_roots(self, board: Board) -> list[Path]:
+        """Every directory the file endpoint may read or write inside.
+
+        Exactly the roots the tree already exposes: each store root, plus each
+        folder a project declares. Nothing is reachable that was not already
+        browsable, so the preview cannot widen the blast radius of the view it
+        opens from.
+        """
+        out: list[Path] = []
+        for name in board.roots:
+            try:
+                out.append(board.root_for(name).expanduser().resolve())
+            except StoreError:
+                continue
+        for p in board.load(tuple(board.roots)):
+            for _label, folder in p.folders:
+                try:
+                    out.append(Path(folder).expanduser().resolve())
+                except OSError:
+                    continue
+        return out
+
+    def _resolve_in_roots(self, board: Board, target: str) -> tuple[Path, Path]:
+        """Resolve a requested path, or refuse it.
+
+        Resolution happens before the containment check, so a symlink or a
+        `..` segment is compared as its real destination rather than as the
+        string someone sent. Returns the file and the root it sits under, since
+        the caller wants the relative path for display.
+        """
+        if not target:
+            raise StoreError("no path given")
+        path = Path(target).expanduser().resolve()
+        for root in self._file_roots(board):
+            try:
+                path.relative_to(root)
+            except ValueError:
+                continue
+            return path, root
+        raise StoreError("path is outside every project folder on this board")
+
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
@@ -335,6 +398,36 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self._tree_payload(Board.from_env(), scope, pid))
             except StoreError as e:
                 return self._json({"error": str(e)}, 400)
+
+        if u.path == "/api/file":
+            # Read one file for the preview pane. Refusals are specific, because
+            # "cannot open" with no reason is the message that makes someone
+            # stop using a feature.
+            try:
+                path, root = self._resolve_in_roots(Board.from_env(),
+                                                    q.get("path", [""])[0])
+            except StoreError as e:
+                return self._json({"error": str(e)}, 400)
+            if not path.is_file():
+                return self._json({"error": "not a file"}, 404)
+            try:
+                size = path.stat().st_size
+            except OSError as e:
+                return self._json({"error": str(e)}, 400)
+            meta = {"path": str(path), "name": path.name,
+                    "rel": str(path.relative_to(root)), "size": size}
+            if path.suffix.lower() not in EDITABLE_SUFFIXES:
+                return self._json({**meta, "editable": False,
+                                   "reason": "not a text file HiveFrame edits"})
+            if size > EDIT_MAX_BYTES:
+                return self._json({**meta, "editable": False,
+                                   "reason": f"{size} bytes, too large to edit here"})
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                return self._json({**meta, "editable": False,
+                                   "reason": f"cannot read as text: {e}"})
+            return self._json({**meta, "editable": True, "text": text})
 
         if u.path == "/api/chat/state":
             # Whether chat is usable at all, and this store's turn log. Cheap:
@@ -408,6 +501,31 @@ class Handler(BaseHTTPRequestHandler):
             except VerdictError as e:
                 return self._json({"error": str(e)}, 400)
             return self._json({"ok": True, "recorded": rec})
+
+        if u.path == "/api/file":
+            # Save an edited file back. Same containment rule as the read, and
+            # a .bak alongside, because the fastest way to make someone stop
+            # trusting an in-page editor is to lose one version of one file.
+            try:
+                path, root_dir = self._resolve_in_roots(board, data.get("path", ""))
+            except StoreError as e:
+                return self._json({"error": str(e)}, 400)
+            if not path.is_file():
+                return self._json({"error": "not a file"}, 404)
+            if path.suffix.lower() not in EDITABLE_SUFFIXES:
+                return self._json({"error": "not a file type HiveFrame edits"}, 400)
+            text = data.get("text")
+            if not isinstance(text, str):
+                return self._json({"error": "no text given"}, 400)
+            try:
+                path.with_suffix(path.suffix + ".bak").write_text(
+                    path.read_text(encoding="utf-8"), encoding="utf-8")
+                path.write_text(text, encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"ok": True, "path": str(path),
+                               "rel": str(path.relative_to(root_dir)),
+                               "bytes": len(text.encode("utf-8"))})
 
         if u.path == "/api/edit":
             return self._edit(board, store, data)
@@ -584,6 +702,26 @@ def selftest() -> int:
         print("  FAIL: a non-work project appeared in a work load")
         return 1
     print("  store boundary holds: work load returned only work projects")
+
+    # The file preview can reach only what the tree already shows. This is the
+    # check that matters most in this feature: it turned a read-only browser
+    # into something that writes, and the containment rule is the only thing
+    # standing between "edit a project note" and "edit anything on the disk".
+    h = Handler.__new__(Handler)
+    roots = h._file_roots(board)
+    if not roots:
+        print("  FAIL: file preview has no roots, so nothing would open")
+        return 1
+    for bad in ("/etc/passwd", str(Path.home() / ".ssh" / "id_rsa"),
+                str(roots[0]) + "/../../../etc/hosts"):
+        try:
+            h._resolve_in_roots(board, bad)
+            print(f"  FAIL: file preview accepted a path outside its roots: {bad}")
+            return 1
+        except StoreError:
+            pass
+    print(f"  file preview is fenced to {len(roots)} declared folder(s); "
+          "traversal and outside paths refused")
 
     # A block must not demote a project that still has a move available.
     probe = replace(projects[0], status="blocked")
