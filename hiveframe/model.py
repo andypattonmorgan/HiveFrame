@@ -243,11 +243,11 @@ class Project:
     def folders(self) -> list[tuple[str, str]]:
         """The directories that belong to this project, as (label, path).
 
-        A declared ``folder`` is the whole answer. Otherwise the fallback is any
-        artifact whose path is a directory. A project is worked in a place, and
-        the file view should show that place rather than the whole store: a tree
-        that lists everything is the same context bleed the charter exists to
-        stop.
+        The declared ``folder`` comes first, then any artifact whose path is a
+        directory. A project is worked in places it has explicitly named, and
+        the file view should show those places rather than the whole store: a
+        tree that lists everything is the same context bleed the charter exists
+        to stop.
 
         Nested paths are dropped in favour of the outermost one, so a folder is
         not drawn twice.
@@ -255,15 +255,14 @@ class Project:
         out: list[tuple[str, str]] = []
         if self.folder:
             out.append(("Project folder", self.folder))
-        else:
-            for a in self.artifacts:
-                if not a.path:
-                    continue
-                try:
-                    if Path(a.path).expanduser().is_dir():
-                        out.append((a.label or "Folder", a.path))
-                except OSError:
-                    continue
+        for a in self.artifacts:
+            if not a.path:
+                continue
+            try:
+                if Path(a.path).expanduser().is_dir():
+                    out.append((a.label or "Folder", a.path))
+            except OSError:
+                continue
 
         kept: list[tuple[str, str]] = []
         seen: list[Path] = []
