@@ -2454,6 +2454,17 @@
                 const para = [];
                 while (i < lines.length && lines[i].trim() &&
                     !/^(#{1,6}\s|```|\s*[-*]\s|\s*\d+[.)]\s|\s*\|)/.test(lines[i])) para.push(lines[i++]);
+                /* The paragraph branch is the last resort, so it is the one
+                   branch that must always consume a line. A line that starts
+                   with a pipe but has no separator row under it falls past the
+                   table branch and is then refused here on the first test,
+                   leaving i where it was: the same line is reconsidered
+                   forever and the tab locks up. Streaming makes it certain,
+                   because every table is a header with no separator row yet
+                   for as long as it takes the next line to arrive. Taking the
+                   line verbatim keeps the renderer moving; the finished table
+                   renders properly on the next chunk. */
+                if (!para.length) para.push(lines[i++]);
                 out.push(`<p>${inline(para.join("\n"))}</p>`);
             }
             closeList();
@@ -3709,7 +3720,10 @@
 
         function projectRootPath() {
             const p = proj(SEL);
-            return p && (p.folders || [])[0] ? p.folders[0].path : "";
+            if (!p) return "";
+            if ((p.folders || [])[0]) return p.folders[0].path;
+            if (p.source_file) return p.source_file.replace(/\/[^/]+$/, "");
+            return "";
         }
 
         function currentImportTaskId() {

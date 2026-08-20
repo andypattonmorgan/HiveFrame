@@ -242,6 +242,17 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def handle_one_request(self):
+        # A browser that navigates away, reloads, or stops a request leaves the
+        # server writing into a closed socket. That is the client's normal
+        # behaviour, not a fault here, and the default handler prints a full
+        # traceback for it. Real faults get buried in that noise, so the two
+        # disconnect errors are swallowed and everything else still raises.
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
     def _json(self, obj, code=200):
         body = json.dumps(obj, indent=2).encode()
         self.send_response(code)
@@ -437,9 +448,11 @@ class Handler(BaseHTTPRequestHandler):
         raise StoreError("path is outside every project folder on this board")
 
     def _project_root(self, project) -> Path:
-        if not project.folders:
-            raise StoreError("this project has no folder to hold imported files")
-        return Path(project.folders[0][1]).expanduser().resolve()
+        if project.folders:
+            return Path(project.folders[0][1]).expanduser().resolve()
+        if project.source_file is not None:
+            return Path(project.source_file).expanduser().resolve().parent
+        raise StoreError("this project has no folder to hold imported files")
 
     def _unique_path(self, path: Path) -> Path:
         if not path.exists():
@@ -1152,6 +1165,27 @@ def selftest() -> int:
         print(f"  FAIL: web/favicon.svg is not well-formed XML: {exc}")
         return 1
     print("  favicon.svg parses as XML")
+
+    # The markdown renderer walks lines with a manual index, so any branch that
+    # can decline a line without advancing that index locks the browser tab
+    # solid: Chrome shows "page unresponsive" and the only fix is to kill it.
+    # That happened once already, with a line starting with a pipe that had no
+    # separator row under it, which is every table for as long as it is still
+    # streaming in. Node is not assumed to be installed, so rather than execute
+    # the renderer this reads it: the paragraph branch is the last resort, and
+    # it must carry an unconditional advance for the case where it matched
+    # nothing. This is a smoke alarm, not a proof.
+    _idx = (WEB / "index.html").read_text(encoding="utf-8")
+    _at = _idx.find("function md(src)")
+    if _at < 0:
+        print("  FAIL: md() not found in index.html")
+        return 1
+    _body = _idx[_at:_at + 4000]
+    if "if (!para.length) para.push(lines[i++]);" not in _body:
+        print("  FAIL: md() paragraph branch can decline a line without "
+              "advancing i; a streaming table will hang the tab")
+        return 1
+    print("  md() always consumes a line, so a partial table cannot hang the tab")
 
     # A block must not demote a project that still has a move available.
     probe = replace(projects[0], status="blocked")
