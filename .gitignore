@@ -10,3 +10,15 @@ projects/
 *.bak
 .chat_session
 chat.jsonl
+
+# Attachment imports. The import target is <project root>/files, and the
+# project root follows whatever store the server was started with, so a stray
+# launch drops user files into the source tree. Real attachments belong beside
+# the project in OneDrive, which has version history; this repo is for code.
+files/
+.DS_Store
+
+# Per-project odometer reading for the chat cost meter. Local state about a
+# session that lives on this machine only.
+.chat_meter*
+transcript.*.jsonl
