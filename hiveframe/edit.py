@@ -25,7 +25,7 @@ from pathlib import Path
 from .model import (KINDS, TIER_PARENT, TIERS, Charter, Project, Relation,
                     Task)
 
-TASK_STATUS = ("open", "doing", "done", "dropped")
+TASK_STATUS = ("open", "doing", "validate", "done", "dropped")
 # Mirrors the verdict vocabulary: a project created here can only start in a
 # state the review screen already knows how to change.
 PROJECT_STATUS = ("active", "blocked", "paused", "done", "killed")

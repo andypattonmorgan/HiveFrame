@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HiveFrame - Workbench dock prototype</title>
+    <style>
+        :root {
+            --bg: #0f1115;
+            --panel: #171a21;
+            --rail: #13161c;
+            --line: #262b35;
+            --ink: #e8eaed;
+            --dim: #9aa3b2;
+            --faint: #6b7280;
+            --acc: #f2b134;
+            --ok: #27ae60;
+            --warn: #f2994a;
+            --stop: #eb5757;
+            --info: #4c9aff;
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        html,
+        body {
+            height: 100%
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            overflow: hidden;
+            font: 14.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif
+        }
+
+        /* ---- shell: three columns, same as today minus the preview column.
+           The preview column is gone on purpose. That is the proposal. ---- */
+        .app {
+            --w-rail: 250px;
+            --w-chat: 300px;
+            display: grid;
+            grid-template-columns: var(--w-rail) 4px minmax(320px, 1fr) 4px var(--w-chat);
+            height: 100vh
+        }
+
+        .app.nochat {
+            --w-chat: 0px
+        }
+
+        .gutter {
+            background: var(--line);
+            cursor: col-resize
+        }
+
+        .app.nochat .gutter.g-chat {
+            display: none
+        }
+
+        aside.rail {
+            background: var(--rail);
+            border-right: 1px solid var(--line);
+            overflow: auto;
+            padding: 10px
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            margin-bottom: 14px
+        }
+
+        .hex {
+            width: 13px;
+            height: 15px;
+            background: var(--acc);
+            clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+            display: inline-block
+        }
+
+        .railhead {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: var(--faint);
+            margin: 14px 0 6px
+        }
+
+        .prow {
+            padding: 6px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13.5px;
+            display: flex;
+            justify-content: space-between;
+            gap: 6px
+        }
+
+        .prow:hover {
+            background: #1c212b
+        }
+
+        .prow.on {
+            background: #202634;
+            box-shadow: inset 2px 0 0 var(--acc)
+        }
+
+        .prow .sc {
+            color: var(--faint);
+            font-variant-numeric: tabular-nums
+        }
+
+        /* ---- main column: now a vertical grid. Content on top, dock below. ---- */
+        .main {
+            display: grid;
+            grid-template-rows: auto minmax(120px, 1fr) 4px var(--h-dock, 0px);
+            min-width: 0;
+            --h-dock: 0px
+        }
+
+        .main.dockopen {
+            --h-dock: 340px
+        }
+
+        .topbar {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--line);
+            background: var(--panel)
+        }
+
+        .tab {
+            background: none;
+            border: 1px solid transparent;
+            color: var(--dim);
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font: inherit;
+            font-size: 13px
+        }
+
+        .tab.on {
+            color: var(--ink);
+            border-color: var(--line);
+            background: #1c212b
+        }
+
+        .spacer {
+            flex: 1
+        }
+
+        .wrap {
+            overflow: auto;
+            padding: 16px
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 12px
+        }
+
+        h1 {
+            font-size: 19px;
+            margin: 0 0 2px
+        }
+
+        h2 {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: .07em;
+            color: var(--faint);
+            margin: 0 0 10px
+        }
+
+        .why {
+            color: var(--faint);
+            font-size: 12.5px
+        }
+
+        /* ---- the summary action bar: where the dock is opened from ---- */
+        .pactions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--line)
+        }
+
+        button.sm {
+            background: #1c212b;
+            border: 1px solid var(--line);
+            color: var(--ink);
+            padding: 5px 11px;
+            border-radius: 6px;
+            cursor: pointer;
+            font: inherit;
+            font-size: 12.5px
+        }
+
+        button.sm:hover {
+            border-color: var(--acc)
+        }
+
+        button.sm.pri {
+            background: var(--acc);
+            color: #1a1200;
+            border-color: var(--acc);
+            font-weight: 600
+        }
+
+        button.sm.on {
+            border-color: var(--acc);
+            color: var(--acc)
+        }
+
+        /* ---- the dock itself ---- */
+        .dockgrip {
+            background: var(--line);
+            cursor: row-resize
+        }
+
+        .main:not(.dockopen) .dockgrip {
+            display: none
+        }
+
+        .dock {
+            background: var(--panel);
+            border-top: 1px solid var(--line);
+            display: grid;
+            grid-template-rows: auto 1fr;
+            min-height: 0;
+            overflow: hidden
+        }
+
+        .main:not(.dockopen) .dock {
+            display: none
+        }
+
+        .dockhead {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 7px 10px;
+            border-bottom: 1px solid var(--line);
+            background: #141821
+        }
+
+        .dockhead b {
+            font-size: 12.5px
+        }
+
+        .dockbody {
+            display: grid;
+            grid-template-columns: 210px 4px 1fr;
+            min-height: 0
+        }
+
+        .dsplit {
+            background: var(--line);
+            cursor: col-resize
+        }
+
+        /* selector side */
+        .dsel {
+            overflow: auto;
+            padding: 8px;
+            border-right: 0
+        }
+
+        .scope {
+            font-size: 10.5px;
+            text-transform: uppercase;
+            letter-spacing: .07em;
+            color: var(--faint);
+            margin: 8px 0 4px;
+            display: flex;
+            align-items: center;
+            gap: 5px
+        }
+
+        .scope::before {
+            content: "";
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--acc)
+        }
+
+        .fitem {
+            padding: 3px 7px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12.5px;
+            color: var(--dim);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis
+        }
+
+        .fitem:hover {
+            background: #1c212b;
+            color: var(--ink)
+        }
+
+        .fitem.on {
+            background: #202634;
+            color: var(--ink);
+            box-shadow: inset 2px 0 0 var(--acc)
+        }
+
+        .fitem .k {
+            color: var(--faint);
+            font-size: 10.5px;
+            margin-left: 5px
+        }
+
+        .filt {
+            width: 100%;
+            background: #0f1218;
+            border: 1px solid var(--line);
+            color: var(--ink);
+            border-radius: 6px;
+            padding: 4px 8px;
+            font: inherit;
+            font-size: 12.5px
+        }
+
+        /* editor side */
+        .dview {
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            min-height: 0;
+            min-width: 0
+        }
+
+        .vhead {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 9px;
+            border-bottom: 1px solid var(--line);
+            background: #141821
+        }
+
+        .fname {
+            font-size: 12.5px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis
+        }
+
+        .vbody {
+            overflow: auto;
+            min-height: 0
+        }
+
+        textarea.ed {
+            width: 100%;
+            height: 100%;
+            background: #0f1218;
+            border: 0;
+            color: var(--ink);
+            padding: 11px 13px;
+            font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+            resize: none;
+            outline: none
+        }
+
+        .fread {
+            padding: 12px 16px;
+            max-width: 70ch
+        }
+
+        .fread h3 {
+            margin: 0 0 6px;
+            font-size: 15px
+        }
+
+        .fread p {
+            color: var(--dim);
+            font-size: 13px
+        }
+
+        .vfoot {
+            padding: 4px 9px;
+            border-top: 1px solid var(--line);
+            font-size: 11.5px;
+            color: var(--faint);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            background: #141821
+        }
+
+        .fempty {
+            padding: 26px;
+            text-align: center;
+            color: var(--faint);
+            font-size: 13px
+        }
+
+        /* ---- overlay mode ---- */
+        .dock.float {
+            position: fixed;
+            left: 12vw;
+            top: 12vh;
+            width: 74vw;
+            height: 72vh;
+            z-index: 60;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            box-shadow: 0 22px 60px rgba(0, 0, 0, .6);
+            display: grid !important
+        }
+
+        .main.dockfloat {
+            --h-dock: 0px
+        }
+
+        .main.dockfloat .dockgrip {
+            display: none
+        }
+
+        /* ---- popped out: the dock is gone from this document ---- */
+        .ghost {
+            padding: 10px;
+            text-align: center;
+            color: var(--faint);
+            font-size: 12.5px;
+            border: 1px dashed var(--line);
+            border-radius: 8px;
+            margin: 10px
+        }
+
+        /* ---- the collector: one button, always in the same place ---- */
+        .collector {
+            position: fixed;
+            right: 14px;
+            bottom: 14px;
+            z-index: 90;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 7px
+        }
+
+        .cbtn {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            color: var(--dim);
+            border-radius: 20px;
+            padding: 7px 13px;
+            cursor: pointer;
+            font: inherit;
+            font-size: 12.5px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, .4)
+        }
+
+        .cbtn:hover {
+            border-color: var(--acc);
+            color: var(--ink)
+        }
+
+        .cbtn .dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--acc);
+            margin-right: 6px
+        }
+
+        .cmenu {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            padding: 7px;
+            width: 250px;
+            box-shadow: 0 14px 40px rgba(0, 0, 0, .5)
+        }
+
+        .cmenu .ch {
+            font-size: 10.5px;
+            text-transform: uppercase;
+            letter-spacing: .07em;
+            color: var(--faint);
+            padding: 3px 6px 6px
+        }
+
+        .crow {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            padding: 6px;
+            border-radius: 6px;
+            font-size: 12.5px
+        }
+
+        .crow:hover {
+            background: #1c212b
+        }
+
+        .crow .st {
+            color: var(--faint);
+            font-size: 11px
+        }
+
+        .focus {
+            position: fixed;
+            left: 14px;
+            bottom: 14px;
+            width: 176px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 9px 11px;
+            z-index: 50
+        }
+
+        .focus b {
+            font-size: 12px
+        }
+
+        .clock {
+            font: 700 26px/1.2 ui-monospace, monospace;
+            color: var(--acc);
+            text-align: center;
+            padding: 4px 0
+        }
+
+        aside.chat {
+            background: var(--rail);
+            border-left: 1px solid var(--line);
+            padding: 10px;
+            overflow: auto
+        }
+
+        .note {
+            border-left: 2px solid var(--acc);
+            padding: 2px 0 2px 10px;
+            margin: 10px 0;
+            color: var(--dim);
+            font-size: 12.5px
+        }
+
+        kbd {
+            background: #0f1218;
+            border: 1px solid var(--line);
+            border-bottom-width: 2px;
+            border-radius: 4px;
+            padding: 0 5px;
+            font: 11px ui-monospace, monospace
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app" id="app">
+
+        <aside class="rail">
+            <div class="brand"><i class="hex"></i><b>HiveFrame</b></div>
+            <div class="railhead">Projects</div>
+            <div class="prow on"><span>HiveLab publishing</span><span class="sc">92</span></div>
+            <div class="prow"><span>WBS patterns</span><span class="sc">83</span></div>
+            <div class="prow"><span>AI in ServiceNow</span><span class="sc">68</span></div>
+            <div class="prow"><span>Charter analyst</span><span class="sc">57</span></div>
+            <div class="prow"><span>ITPMO portfolio app</span><span class="sc">38</span></div>
+            <div class="prow"><span>HiveFrame</span><span class="sc">30</span></div>
+
+            <div class="railhead">What changed</div>
+            <p class="why" style="margin:0">The Files tree used to live here and
+                the preview took a whole column. Both are gone. The rail is
+                projects only.</p>
+        </aside>
+
+        <div class="gutter"></div>
+
+        <div class="main" id="main">
+            <div class="topbar">
+                <button class="tab on">Project</button>
+                <button class="tab">Brief</button>
+                <button class="tab">Triage</button>
+                <button class="tab">Tools</button>
+                <button class="tab">Capacity</button>
+                <span class="spacer"></span>
+                <button class="tab">Chat</button>
+            </div>
+
+            <div class="wrap">
+                <div class="card">
+                    <h1>HiveLab publishing</h1>
+                    <div class="why">project &middot; blocked &middot; parent: Next-Generation Delivery Lab
+                        &middot; score 92.0</div>
+                    <p style="color:var(--dim);font-size:13.5px;margin:10px 0 0">
+                        Our work cannot be shared unless someone can open a link to it. Sending
+                        files around means nobody knows which copy is current.
+                    </p>
+
+                    <!-- THIS IS THE MENU ITEM YOU ASKED FOR -->
+                    <div class="pactions">
+                        <button class="sm pri" id="openWb">Files &amp; editor</button>
+                        <button class="sm">Add move</button>
+                        <button class="sm">Verdict</button>
+                        <button class="sm">Open folder</button>
+                        <span class="why" id="wbhint">Opens the workbench docked below. <kbd>F</kbd></span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Moves</h2>
+                    <div class="why">2 open &middot; 1 blocked on a host being assigned</div>
+                </div>
+
+                <div class="card">
+                    <h2>Try this</h2>
+                    <p class="why" style="margin:0 0 8px">
+                        1. Press <b>Files &amp; editor</b>. It docks at the bottom of this column.<br>
+                        2. Pick a file on the left, it opens on the right in the same frame.<br>
+                        3. Use <b>Float</b> to lift it into an overlay, <b>Pop out</b> to send it
+                        to its own window.<br>
+                        4. Once it is floating or popped, look at the bottom right. The
+                        <b>collector</b> appears. Press it to bring everything home.
+                    </p>
+                </div>
+            </div>
+
+            <div class="dockgrip" id="dockgrip" title="Drag to resize"></div>
+
+            <!-- the workbench: selector and editor in one frame -->
+            <section class="dock" id="dock">
+                <div class="dockhead">
+                    <i class="hex" style="width:10px;height:12px"></i>
+                    <b>Workbench</b>
+                    <span class="why" id="dscope">HiveLab publishing</span>
+                    <span class="spacer"></span>
+                    <button class="sm" id="btnDock">Dock</button>
+                    <button class="sm" id="btnFloat">Float</button>
+                    <button class="sm" id="btnPop">Pop out</button>
+                    <button class="sm" id="btnClose">Close</button>
+                </div>
+
+                <div class="dockbody">
+                    <div class="dsel">
+                        <input class="filt" id="filt" placeholder="Filter files...">
+                        <div id="tree"></div>
+                    </div>
+                    <div class="dsplit" id="dsplit"></div>
+                    <div class="dview">
+                        <div class="vhead" id="vhead">
+                            <span class="fname">No file open</span>
+                        </div>
+                        <div class="vbody" id="vbody">
+                            <div class="fempty">Pick a file on the left.</div>
+                        </div>
+                        <div class="vfoot" id="vfoot"><span>ready</span></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <div class="gutter g-chat"></div>
+
+        <aside class="chat">
+            <div class="brand" style="margin-bottom:8px"><i class="hex" style="width:10px;height:12px"></i>
+                <b>Ask</b>
+            </div>
+            <div class="why">Sees: Project &middot; HiveLab publishing</div>
+            <div class="note">
+                The chat rail keeps its own column. It is the one panel that
+                genuinely needs to be read at the same time as the main view,
+                which is the test for deserving a column.
+            </div>
+        </aside>
+    </div>
+
+    <!-- the focus timer, unchanged, shown for context -->
+    <div class="focus">
+        <div style="display:flex;align-items:center;gap:6px"><i class="hex" style="width:9px;height:11px"></i>
+            <b>Focus</b>
+        </div>
+        <div class="clock">24:31</div>
+    </div>
+
+    <!-- the collector -->
+    <div class="collector" id="collector" style="display:none">
+        <div class="cmenu" id="cmenu" style="display:none">
+            <div class="ch">Open panels</div>
+            <div id="clist"></div>
+        </div>
+        <button class="cbtn" id="cbtn"><span class="dot"></span><span id="clabel">1 panel away</span></button>
+    </div>
+
+    <script>
+        /* Prototype only. Fake file data, no server, no persistence.
+           The point is the interaction, not the plumbing. */
+
+        const FILES = [
+            {
+                scope: "Project folder", items: [
+                    { n: "hivelab.toml", k: "toml", edit: true, body: '[project]\nid      = "hivelab"\nname    = "HiveLab publishing"\ntier    = "project"\nparent  = "next-gen-lab"\nstatus  = "blocked"\n\n[charter]\nproblem = "Our work cannot be shared unless\n           someone can open a link to it."' },
+                    { n: "README.md", k: "md", edit: true, render: true, body: "# HiveLab publishing\n\nThe designated publish surface. Static site,\n40 pages, about 3 MB, no server-side runtime.\n\nNo host is currently assigned." },
+                    { n: "deploy-notes.md", k: "md", edit: true, render: true, body: "# Deploy notes\n\nNever hand-copy files to the publish surface.\nAlways use the tool." },
+                ]
+            },
+            {
+                scope: "Declared: tools/hivelab-publish", items: [
+                    { n: "build_web.py", k: "py", edit: true, body: "def build():\n    \"\"\"Assemble web/ from source.\n\n    Not a copy. Wraps each page with the\n    platform layer: nav, favicon, cards.\n    \"\"\"\n    ..." },
+                    { n: "deploy.sh", k: "sh", edit: true, body: "#!/bin/bash\n# rsync to $HIVELAB_HOST\n# --dry-run shows what would ship" },
+                    { n: "capability.yaml", k: "yaml", edit: true, body: "owner: D112236\nstage: active\naccess: write\nsystems: [hivelab]" },
+                ]
+            },
+            {
+                scope: "Attachments", items: [
+                    { n: "site-map.pdf", k: "pdf", edit: false },
+                    { n: "screenshot.png", k: "image", edit: false },
+                    { n: "hosting-request.docx", k: "office", edit: false },
+                ]
+            },
+        ];
+
+        const main = document.getElementById("main");
+        const dock = document.getElementById("dock");
+        let MODE = "closed";   // closed | dock | float | pop
+        let OPEN = null;
+        let POPWIN = null;
+
+        /* One function owns where the panel lives. Every button is a call to
+           this, so the states cannot disagree with each other. */
+        function setMode(m) {
+            if (MODE === "pop" && m !== "pop" && POPWIN) { POPWIN.close(); return; }
+            MODE = m;
+            main.classList.toggle("dockopen", m === "dock" || m === "float");
+            main.classList.toggle("dockfloat", m === "float");
+            dock.classList.toggle("float", m === "float");
+            dock.style.display = (m === "closed" || m === "pop") ? "none" : "";
+            ["btnDock", "btnFloat", "btnPop"].forEach(id =>
+                document.getElementById(id).classList.remove("on"));
+            if (m === "dock") document.getElementById("btnDock").classList.add("on");
+            if (m === "float") document.getElementById("btnFloat").classList.add("on");
+            paintCollector();
+        }
+
+        function drawTree(filter = "") {
+            const f = filter.trim().toLowerCase();
+            const el = document.getElementById("tree");
+            el.innerHTML = FILES.map(g => {
+                const items = g.items.filter(i => !f || i.n.toLowerCase().includes(f));
+                if (!items.length) return "";
+                return `<div class="scope">${g.scope}</div>` + items.map(i =>
+                    `<div class="fitem${OPEN && OPEN.n === i.n ? " on" : ""}"
+                          onclick="openFile('${i.n}')">${i.n}<span class="k">${i.k}</span></div>`
+                ).join("");
+            }).join("") || `<div class="fempty">No match.</div>`;
+        }
+
+        function findFile(n) {
+            for (const g of FILES) for (const i of g.items) if (i.n === n) return i;
+            return null;
+        }
+
+        function openFile(n) {
+            OPEN = findFile(n);
+            drawTree(document.getElementById("filt").value);
+            drawView();
+        }
+
+        function drawView() {
+            const h = document.getElementById("vhead");
+            const b = document.getElementById("vbody");
+            const f = document.getElementById("vfoot");
+            if (!OPEN) {
+                h.innerHTML = `<span class="fname">No file open</span>`;
+                b.innerHTML = `<div class="fempty">Pick a file on the left.</div>`;
+                f.innerHTML = `<span>ready</span>`;
+                return;
+            }
+            const canRender = !!OPEN.render;
+            h.innerHTML = `<span class="fname">${OPEN.n}</span>
+        <span class="spacer"></span>
+        ${canRender ? `<button class="sm" onclick="toggleSrc()">${OPEN._src ? "Rendered" : "Source"}</button>` : ""}
+        ${OPEN.edit ? `<button class="sm pri" onclick="fakeSave()">Save</button>` : ""}
+        <button class="sm" onclick="alert('Reveals in Finder')">Finder</button>`;
+
+            if (!OPEN.edit) {
+                b.innerHTML = `<div class="fempty">
+          <b style="color:var(--dim)">${OPEN.k.toUpperCase()}</b><br><br>
+          This one is previewed, not edited.<br>
+          A PDF renders in a frame, an image renders inline, an Office file
+          says plainly that it cannot be rendered and offers Finder.</div>`;
+            } else if (canRender && !OPEN._src) {
+                b.innerHTML = `<div class="fread"><h3>${OPEN.body.split("\n")[0].replace(/^#\s*/, "")}</h3>
+          <p>${OPEN.body.split("\n").slice(1).join("<br>")}</p></div>`;
+            } else {
+                b.innerHTML = `<textarea class="ed" spellcheck="false"
+          oninput="dirty()">${OPEN.body || ""}</textarea>`;
+            }
+            f.innerHTML = `<span>${OPEN.k}</span><span>&middot;</span><span id="fst">saved</span>`;
+        }
+
+        function toggleSrc() { OPEN._src = !OPEN._src; drawView(); }
+        function dirty() { const s = document.getElementById("fst"); if (s) { s.textContent = "unsaved changes"; s.style.color = "var(--warn)"; } }
+        function fakeSave() { const s = document.getElementById("fst"); if (s) { s.textContent = "saved"; s.style.color = ""; } }
+
+        /* Pop out moves the node rather than copying it, so state and handlers
+           survive. Same approach the focus timer already uses. */
+        async function popOut() {
+            if (!window.documentPictureInPicture) { alert("This browser has no document picture-in-picture. The button would be hidden, not left to fail."); return; }
+            const w = await documentPictureInPicture.requestWindow({ width: 900, height: 560 });
+            [...document.styleSheets].forEach(ss => {
+                try {
+                    const css = [...ss.cssRules].map(r => r.cssText).join("");
+                    const el = w.document.createElement("style");
+                    el.textContent = css; w.document.head.appendChild(el);
+                } catch (e) { }
+            });
+            w.document.body.style.margin = "0";
+            w.document.body.appendChild(dock);
+            dock.classList.remove("float");
+            dock.style.display = "";
+            dock.style.position = "static";
+            dock.style.width = "100%"; dock.style.height = "100vh";
+            POPWIN = w; MODE = "pop";
+            main.classList.remove("dockopen", "dockfloat");
+            paintCollector();
+            w.addEventListener("pagehide", () => {
+                main.appendChild(dock);
+                dock.style.position = ""; dock.style.width = ""; dock.style.height = "";
+                POPWIN = null;
+                setMode("dock");
+            });
+        }
+
+        /* The collector. It only appears when something is not where you left
+           it, and it always sits in the same corner. One button, one job:
+           bring it back. */
+        function paintCollector() {
+            const away = MODE === "float" || MODE === "pop";
+            document.getElementById("collector").style.display = away ? "" : "none";
+            if (!away) { document.getElementById("cmenu").style.display = "none"; return; }
+            document.getElementById("clabel").textContent =
+                MODE === "pop" ? "Workbench in its own window" : "Workbench floating";
+            document.getElementById("clist").innerHTML = `
+        <div class="crow">
+          <span>Workbench</span>
+          <span style="display:flex;gap:6px;align-items:center">
+            <span class="st">${MODE}</span>
+            <button class="sm" onclick="setMode('dock')">Bring back</button>
+          </span>
+        </div>`;
+        }
+
+        document.getElementById("openWb").onclick = () => setMode(MODE === "closed" ? "dock" : "closed");
+        document.getElementById("btnDock").onclick = () => setMode("dock");
+        document.getElementById("btnFloat").onclick = () => setMode("float");
+        document.getElementById("btnPop").onclick = popOut;
+        document.getElementById("btnClose").onclick = () => setMode("closed");
+        document.getElementById("cbtn").onclick = () => {
+            const m = document.getElementById("cmenu");
+            m.style.display = m.style.display === "none" ? "" : "none";
+        };
+        document.getElementById("filt").oninput = e => drawTree(e.target.value);
+
+        addEventListener("keydown", e => {
+            if (e.key.toLowerCase() === "f" && !/input|textarea/i.test(e.target.tagName)) {
+                e.preventDefault(); setMode(MODE === "closed" ? "dock" : "closed");
+            }
+            if (e.key === "Escape" && MODE === "float") setMode("dock");
+        });
+
+        /* drag to resize the dock height */
+        (function () {
+            const g = document.getElementById("dockgrip");
+            let y0 = 0, h0 = 0, on = false;
+            g.addEventListener("mousedown", e => {
+                on = true; y0 = e.clientY;
+                h0 = parseInt(getComputedStyle(main).getPropertyValue("--h-dock")) || 340;
+                document.body.style.userSelect = "none";
+            });
+            addEventListener("mousemove", e => {
+                if (!on) return;
+                const h = Math.min(innerHeight - 190, Math.max(150, h0 - (e.clientY - y0)));
+                main.style.setProperty("--h-dock", h + "px");
+            });
+            addEventListener("mouseup", () => { on = false; document.body.style.userSelect = ""; });
+        })();
+
+        drawTree();
+        setMode("closed");
+    </script>
+</body>
+
+</html>

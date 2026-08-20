@@ -39,20 +39,23 @@
             font: 14.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif
         }
 
-        /* Four columns, each with a drag handle between it and the next.
+        /* Three columns, each with a drag handle between it and the next.
 
            Widths are CSS variables so a drag is one property write rather than
            a re-layout, and they persist, because a layout you have to rebuild
-           every morning is one you stop adjusting. The preview column is 0 wide
-           until a file is open: an empty panel taking a third of the screen is
-           worse than no panel. */
+           every morning is one you stop adjusting.
+
+           Files used to take a fourth column. It no longer does: the file
+           selector and the viewer are one panel that docks under the main
+           column, because browsing and reading are one activity and splitting
+           them across the two far edges of the screen made you look in two
+           places to do one thing. See .dock. */
         .app {
             --w-rail: 290px;
-            --w-prev: 0px;
             --w-chat: 380px;
             display: grid;
             grid-template-columns:
-                var(--w-rail) 4px minmax(320px, 1fr) 4px var(--w-prev) 4px var(--w-chat);
+                var(--w-rail) 4px minmax(320px, 1fr) 4px var(--w-chat);
             height: 100vh
         }
 
@@ -61,10 +64,6 @@
            you stop asking. */
         .app.nochat {
             --w-chat: 0px
-        }
-
-        .app.noprev {
-            --w-prev: 0px
         }
 
         .gutter {
@@ -105,25 +104,15 @@
             grid-column: 3
         }
 
-        .g-prev {
+        .g-chat {
             grid-column: 4
         }
 
-        .prev {
+        .crail {
             grid-column: 5
         }
 
-        .g-chat {
-            grid-column: 6
-        }
-
-        .crail {
-            grid-column: 7
-        }
-
         .app.nochat .gutter.g-chat,
-        .app.noprev .gutter.g-prev,
-        .app.noprev .prev,
         .app.nochat .crail {
             display: none
         }
@@ -496,9 +485,32 @@
             vertical-align: middle
         }
 
-        /* ---- main ---- */
+        /* ---- main ----
+           A vertical grid rather than one scrolling block, because the dock has
+           to hold the bottom of this column without the project view scrolling
+           over it. Four rows: tabs, the view, a drag handle, the dock. The dock
+           row is 0 high until it is opened. */
         .main {
+            --h-dock: 0px;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto var(--h-dock);
+            min-height: 0;
+            overflow: hidden
+        }
+
+        .main.dockopen {
+            --h-dock: 340px
+        }
+
+        /* Floating lifts the dock out of the flow, so the row it occupied must
+           collapse or the view keeps a hole where the panel used to be. */
+        .main.dockfloat {
+            --h-dock: 0px
+        }
+
+        .mscroll {
             overflow-y: auto;
+            min-height: 0;
             padding: 0 0 60px
         }
 
@@ -899,13 +911,21 @@
         }
 
         .chip {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             font-size: 10.5px;
             font-weight: 700;
             padding: 1px 6px;
             border-radius: 3px;
             color: #0f1115;
             margin-right: 4px
+        }
+
+        .chip-mark {
+            font-size: 9px;
+            line-height: 1;
+            flex: 0 0 auto
         }
 
         .lnk {
@@ -958,24 +978,153 @@
             padding-right: 10px
         }
 
-        /* ---- preview panel ----
-           Its own column, full height, so a file is read beside the project
-           rather than inside a card that pushes the project off screen. */
-        .prev {
+        /* ---- the workbench dock ----
+           A file selector and a viewer in one frame, because choosing a file
+           and reading it are one activity. They used to sit at opposite edges
+           of the screen: the tree in the left rail, the preview in a column on
+           the right. That made you look in two places to do one thing.
+
+           It lives in one of four places, and setMode() is the only thing that
+           decides which. Four booleans arguing with each other is how a panel
+           ends up both hidden and taking space. */
+        .dock {
             background: var(--rail);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            min-width: 0
+            border-top: 1px solid var(--line);
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+            min-height: 0;
+            min-width: 0;
+            overflow: hidden
         }
 
-        .fhead {
+        .main:not(.dockopen):not(.dockfloat) .dock,
+        .main.dockpop .dock {
+            display: none
+        }
+
+        /* Floating is for when the panel needs to be big for a moment. It is
+           deliberately not resizable or draggable: that is what pop out is
+           for, and two ways to do the same thing is two things to lose. */
+        .dock.float {
+            position: fixed;
+            left: 8vw;
+            top: 9vh;
+            width: 80vw;
+            height: 78vh;
+            z-index: 60;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            box-shadow: 0 24px 70px rgba(0, 0, 0, .62)
+        }
+
+        .dockgrip {
+            height: 4px;
+            cursor: row-resize;
+            position: relative
+        }
+
+        .dockgrip::after {
+            content: "";
+            position: absolute;
+            inset: 1px 0;
+            background: var(--line);
+            transition: background .12s
+        }
+
+        .dockgrip:hover::after,
+        .dockgrip.dragging::after {
+            background: var(--accent, #4c9aff)
+        }
+
+        .main:not(.dockopen) .dockgrip {
+            display: none
+        }
+
+        .dhead {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 10px 12px;
+            padding: 7px 11px;
             border-bottom: 1px solid var(--line);
-            flex: 0 0 auto
+            background: var(--panel);
+            flex-wrap: wrap
+        }
+
+        .dhead b {
+            font-size: 12.5px
+        }
+
+        .dbody {
+            display: grid;
+            grid-template-columns: var(--w-sel, 230px) 4px minmax(0, 1fr);
+            min-height: 0;
+            min-width: 0
+        }
+
+        .dsplit {
+            cursor: col-resize;
+            position: relative
+        }
+
+        .dsplit::after {
+            content: "";
+            position: absolute;
+            inset: 0 1px;
+            background: var(--line);
+            transition: background .12s
+        }
+
+        .dsplit:hover::after,
+        .dsplit.dragging::after {
+            background: var(--accent, #4c9aff)
+        }
+
+        /* selector side */
+        .dsel {
+            overflow: auto;
+            min-height: 0;
+            min-width: 0;
+            padding: 8px 8px 14px
+        }
+
+        .dfilt {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--line);
+            color: var(--ink);
+            border-radius: 7px;
+            padding: 5px 9px;
+            font: inherit;
+            font-size: 12.5px;
+            margin-bottom: 8px
+        }
+
+        .dfilt:focus {
+            outline: none;
+            border-color: var(--acc)
+        }
+
+        /* viewer side */
+        .dview {
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto;
+            min-height: 0;
+            min-width: 0;
+            background: var(--bg)
+        }
+
+        .prev {
+            display: contents
+        }
+
+        .pvhead {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--line);
+            background: var(--panel);
+            min-width: 0
         }
 
         .fname {
@@ -990,9 +1139,9 @@
         }
 
         .fbody2 {
-            flex: 1 1 auto;
             overflow: auto;
             min-height: 0;
+            min-width: 0;
             display: flex;
             flex-direction: column
         }
@@ -1038,12 +1187,94 @@
         .ffoot {
             padding: 6px 12px;
             border-top: 1px solid var(--line);
-            flex: 0 0 auto
+            background: var(--panel)
         }
 
         .fempty {
             padding: 22px;
             color: var(--faint)
+        }
+
+        /* ---- the collector ----
+           Only appears when the workbench is somewhere other than its dock. In
+           the dock it is invisible, because nothing is lost and a permanent
+           button for a problem you do not have is noise. Fixed corner, never
+           moves: a recovery control you have to hunt for is not one. */
+        .collector {
+            position: fixed;
+            right: 16px;
+            bottom: 16px;
+            z-index: 80;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px
+        }
+
+        .collector[hidden] {
+            display: none
+        }
+
+        .cobtn {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            color: var(--dim);
+            border-radius: 999px;
+            padding: 8px 14px;
+            cursor: pointer;
+            font: inherit;
+            font-size: 12.5px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .45)
+        }
+
+        .cobtn:hover {
+            border-color: var(--acc);
+            color: var(--ink)
+        }
+
+        .cobtn .dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--acc);
+            margin-right: 7px;
+            vertical-align: middle
+        }
+
+        .comenu {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 8px;
+            width: 262px;
+            box-shadow: 0 16px 44px rgba(0, 0, 0, .55)
+        }
+
+        .comenu[hidden] {
+            display: none
+        }
+
+        .comenu .coh {
+            font-size: 10.5px;
+            text-transform: uppercase;
+            letter-spacing: .07em;
+            color: var(--faint);
+            padding: 2px 6px 7px
+        }
+
+        .corow {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            padding: 6px;
+            border-radius: 7px;
+            font-size: 12.5px
+        }
+
+        .corow:hover {
+            background: #1c212b
         }
 
         .tree-dir {
@@ -1397,6 +1628,65 @@
             min-height: 14px
         }
 
+        .prefsbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: center;
+            margin-top: 8px;
+            flex-wrap: wrap
+        }
+
+        .prefs {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: #13161c;
+            gap: 8px;
+            grid-template-columns: repeat(2, minmax(0, 1fr))
+        }
+
+        .prefs.open {
+            display: grid
+        }
+
+        .prefs .opt {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            border: 1px solid #1e222b;
+            border-radius: 7px;
+            padding: 6px 8px;
+            background: #0f1115;
+            color: var(--dim);
+            font-size: 12px
+        }
+
+        .prefs .opt input[type="checkbox"] {
+            accent-color: var(--acc)
+        }
+
+        .prefs .opt input[type="number"] {
+            width: 78px;
+            background: #0f1115;
+            color: var(--ink);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 4px 6px;
+            font: inherit;
+            font-size: 12px;
+            text-align: right
+        }
+
+        .prefs .note {
+            grid-column: 1 / -1;
+            color: var(--faint);
+            font-size: 11px
+        }
+
         .ctx {
             text-align: center;
             color: var(--dim);
@@ -1512,22 +1802,18 @@
 </head>
 
 <body>
-    <div class="app noprev" id="app">
+    <div class="app" id="app">
 
         <aside class="rail">
             <div class="brand"><i class="hex"></i><b>HiveFrame</b><span id="cnt"></span></div>
             <div class="railhead">Projects</div>
             <div class="plist" id="plist"></div>
-            <div class="railhead railsplit">Files<select class="fhist" id="fhist"
-                    title="Files you have opened in this project"></select><button class="sm" id="ftreerefresh"
-                    title="Re-read this project's folders">Refresh</button></div>
-            <div class="ftree" id="ftree"></div>
             <div class="railfoot" id="railfoot"></div>
         </aside>
 
         <div class="gutter g-rail" data-drag="rail"></div>
 
-        <div class="main">
+        <div class="main" id="main">
             <div class="topbar">
                 <button class="tab on" data-v="project">Project</button>
                 <button class="tab" data-v="brief">Brief</button>
@@ -1535,15 +1821,44 @@
                 <button class="tab" data-v="tools">Tools</button>
                 <button class="tab" data-v="capacity">Capacity</button>
                 <span class="spacer"></span>
+                <button class="tab" id="wbtoggle" title="Files and editor for this project (F)">Files</button>
                 <button class="tab" id="chattoggle" title="Show or hide chat">Chat</button>
                 <span class="why" id="stamp"></span>
             </div>
-            <div class="wrap" id="view"></div>
+            <div class="mscroll">
+                <div class="wrap" id="view"></div>
+            </div>
+
+            <div class="dockgrip" id="dockgrip" title="Drag to resize the workbench"></div>
+
+            <!-- The workbench. Selector on the left, viewer on the right, one
+                 frame. It is a child of .main so docking is a grid row rather
+                 than a floating overlay pretending to be attached. -->
+            <section class="dock" id="dock">
+                <div class="dhead">
+                    <i class="hex" style="width:11px;height:13px"></i>
+                    <b>Workbench</b>
+                    <span class="why" id="dscope"></span>
+                    <span class="spacer"></span>
+                    <select class="fhist" id="fhist" title="Files you have opened in this project"></select>
+                    <button class="sm" id="ftreerefresh" title="Re-read this project's folders">Refresh</button>
+                    <button class="sm" id="dbdock" title="Dock at the bottom of this column">Dock</button>
+                    <button class="sm" id="dbfloat" title="Lift into an overlay (Esc to dock again)">Float</button>
+                    <button class="sm" id="dbpop" title="Move into its own always-on-top window">Pop out</button>
+                    <button class="sm" id="dbclose" title="Close the workbench (F)">Close</button>
+                </div>
+                <div class="dbody">
+                    <div class="dsel">
+                        <input class="dfilt" id="dfilt" placeholder="Filter files..." spellcheck="false">
+                        <div class="ftree" id="ftree"></div>
+                    </div>
+                    <div class="dsplit" id="dsplit" data-drag="sel"></div>
+                    <div class="dview">
+                        <aside class="prev" id="prev"></aside>
+                    </div>
+                </div>
+            </section>
         </div>
-
-        <div class="gutter g-prev" data-drag="prev"></div>
-
-        <aside class="prev" id="prev"></aside>
 
         <div class="gutter g-chat" data-drag="chat"></div>
 
@@ -1572,6 +1887,17 @@
         </aside>
     </div>
 
+    <!-- The collector. Hidden while the workbench is in its dock, because
+         nothing is lost and a permanent button for a problem you do not have is
+         noise. It appears the moment a panel is floating or in its own window. -->
+    <div class="collector" id="collector" hidden>
+        <div class="comenu" id="comenu" hidden>
+            <div class="coh">Panels away from home</div>
+            <div id="colist"></div>
+        </div>
+        <button class="cobtn" id="cobtn"><span class="dot"></span><span id="colabel"></span></button>
+    </div>
+
     <div class="focus" id="focus">
         <div class="fhead" id="fdrag">
             <i class="hex" style="width:12px;height:14px"></i>
@@ -1589,6 +1915,25 @@
             <div class="scopebar">
                 <span class="scope" id="scope">Task focus</span>
                 <button class="sm" id="projfocus" title="Point the timer at the whole project">Project</button>
+            </div>
+            <div class="prefsbar">
+                <button class="sm" id="preftoggle" title="Show or hide timer settings">Timer settings</button>
+                <span class="why" id="prefsum"></span>
+            </div>
+            <div class="prefs" id="prefs">
+                <label class="opt"><span>Alerts</span><input type="checkbox" id="pref-alerts"></label>
+                <label class="opt"><span>Auto-start next session</span><input type="checkbox"
+                        id="pref-autostart"></label>
+                <label class="opt"><span>Work minutes</span><input type="number" id="pref-work" min="5"
+                        step="1"></label>
+                <label class="opt"><span>Break minutes</span><input type="number" id="pref-break" min="1"
+                        step="1"></label>
+                <label class="opt"><span>Lunch minutes</span><input type="number" id="pref-lunch" min="5"
+                        step="1"></label>
+                <label class="opt"><span>Sessions per lunch</span><input type="number" id="pref-sessions" min="1"
+                        step="1"></label>
+                <div class="note">Changes apply to the next phase. Current countdown stays put while it is running.
+                </div>
             </div>
             <div class="cands" id="cands"></div>
             <div class="frow">
@@ -1667,7 +2012,7 @@
         const TFILTER_KEY = "hiveframe.taskfilter";
         const TFILTERS = [
             ["all", "All", null],
-            ["live", "Open", ["open", "doing"]],
+            ["live", "Open", ["open", "doing", "validate"]],
             ["doing", "Doing", ["doing"]],
             ["done", "Done", ["done"]],
             ["dropped", "Dropped", ["dropped"]],
@@ -1711,6 +2056,11 @@
         function taskFilterCount(p, k) {
             const f = TFILTERS.find(x => x[0] === k);
             return (p.tasks || []).filter(t => !f || !f[2] || f[2].includes(t.status)).length;
+        }
+
+        const TASK_WORKABLE = ["open", "doing"];
+        function taskWorkable(t) {
+            return TASK_WORKABLE.includes(t.status);
         }
 
         /* Only a blocker that is still open is a blocker.
@@ -1905,7 +2255,11 @@
             SEL = id; FILE = null; FILE_DIRTY = false;
             clearChatDone(id);
             drawRail(); syncChatProject();
-            showPrev(false); drawPrev();
+            /* The workbench stays where it is and re-scopes to the new project.
+               Closing it would mean reopening it every time you change subject,
+               and a panel you have to keep restoring is one you stop using. The
+               file it was showing does close: it belonged to the old project. */
+            drawPrev(); drawFiles(); paintScope();
             setView("project");
         }
 
@@ -1913,11 +2267,12 @@
 
         function draw() {
             const el = document.getElementById("view");
-            if (VIEW === "brief") { el.innerHTML = briefView(); loadCarry(); return; }
+            if (VIEW === "brief") { el.innerHTML = briefView(); decorateStatusChips(el); loadCarry(); return; }
             if (VIEW === "triage") return el.innerHTML = triageView();
             if (VIEW === "tools") return el.innerHTML = toolsView();
             if (VIEW === "capacity") return el.innerHTML = capView();
             el.innerHTML = projectView();
+            decorateStatusChips(el);
         }
 
         /* ---- chat: the Copilot CLI in a rail, not a tab ----
@@ -2278,6 +2633,7 @@
             if (t.note) lines.push(`Context: ${t.note}`);
             if (blockers.length) lines.push(`Blocked by #${blockers.join(", #")}. Say so if that stops you.`);
             if (c.goal) lines.push(`Project goal: ${c.goal}`);
+            lines.push("If you finish it, leave the task in validate rather than done, then ask me to accept it.");
             lines.push("Plan first, in two or three lines, then wait.");
 
             const box = document.getElementById("cprompt");
@@ -2491,7 +2847,11 @@
             const missing = T.filter(t => t.path && !t.exists);
             const und = BOARD.undeclared_tools || [];
 
-            const chip = (txt, col) => `<span class="chip" style="background:${col}">${txt}</span>`;
+            const chipMark = col => col === "var(--ok)" ? "✓"
+                : col === "var(--warn)" ? "!"
+                    : col === "var(--stop)" ? "✕"
+                        : col === "var(--info)" ? "i" : "";
+            const chip = (txt, col) => `<span class="chip" style="background:${col}">${chipMark(col) ? `<span class="chip-mark" aria-hidden="true">${chipMark(col)}</span>` : ""}<span>${txt}</span></span>`;
             const acc = a => a === "write" ? chip("write", "var(--stop)")
                 : a === "read-write-local" ? chip("local write", "var(--warn)")
                     : chip("read-only", "var(--ok)");
@@ -2816,10 +3176,33 @@
 
         function paintCarry() {
             const box = document.getElementById("carrybox");
-            if (box) box.innerHTML = carryHtml();
+            if (box) {
+                box.innerHTML = carryHtml();
+                decorateStatusChips(box);
+            }
             const count = document.getElementById("carrycount");
             if (count) count.textContent = CARRY.length
                 ? `${CARRY.length} open` : (CARRY_STAT ? "" : "all clear");
+        }
+
+        function decorateStatusChips(root) {
+            if (!root) return;
+            const marks = [
+                ["[style*=\"var(--ok)\"]", "✓"],
+                ["[style*=\"var(--warn)\"]", "!"],
+                ["[style*=\"var(--stop)\"]", "✕"],
+                ["[style*=\"var(--info)\"]", "i"],
+            ];
+            marks.forEach(([sel, mark]) => {
+                root.querySelectorAll(`.chip${sel}`).forEach(el => {
+                    if (el.querySelector(".chip-mark")) return;
+                    const s = document.createElement("span");
+                    s.className = "chip-mark";
+                    s.setAttribute("aria-hidden", "true");
+                    s.textContent = mark;
+                    el.prepend(s);
+                });
+            });
         }
 
         function carryHtml() {
@@ -3015,6 +3398,9 @@
            have opened before. Both are per project, because a change in one
            project is not news while you are reading another. */
         let TOUCHED = {};
+        /* Live text filter for the selector. Held outside drawFiles so a
+           redraw for any other reason keeps the box and the tree agreeing. */
+        let FILTER = "";
         const HIST_KEY = "hiveframe.filehistory", HIST_MAX = 25;
         let HISTORY = {};
         try { HISTORY = JSON.parse(localStorage.getItem(HIST_KEY) || "{}"); } catch (e) { HISTORY = {}; }
@@ -3107,7 +3493,39 @@
             }
             bindImportZone();
             markTouched();
+            applyFilter();
             markOpenFile();
+            paintScope();
+        }
+
+        /* The dock is a floating frame that can drift away from the board it
+           belongs to, so it states which project it is showing. */
+        function paintScope() {
+            const el = document.getElementById("dscope");
+            if (!el) return;
+            const p = SEL ? proj(SEL) : null;
+            el.textContent = p ? p.title : "No project selected";
+        }
+
+        /* Filtering hides rows after render rather than rebuilding the tree,
+           for the same reason marks are: a rebuild collapses your folders and
+           you lose your place on every keystroke. */
+        function applyFilter() {
+            const q = FILTER;
+            const items = document.querySelectorAll("#ftree .tree-item");
+            items.forEach(el => {
+                const path = (el.getAttribute("title") || "").toLowerCase();
+                el.style.display = (!q || path.includes(q)) ? "" : "none";
+            });
+            document.querySelectorAll("#ftree .tree-dir").forEach(d => {
+                if (!q) { d.style.display = ""; return; }
+                /* A folder with no surviving file in it is noise, so it goes
+                   too. With a filter on, every remaining folder opens: a hit
+                   you cannot see is not a hit. */
+                const hit = [...d.querySelectorAll(".tree-item")].some(i => i.style.display !== "none");
+                d.style.display = hit ? "" : "none";
+                if (hit) d.open = true;
+            });
         }
 
         /* Marks are applied after render rather than baked into the row, so
@@ -3128,15 +3546,104 @@
 
 
 
-        /* ---- preview panel: open, read, edit, save ----
+        /* ---- the workbench: where it lives ----
+
+           Four states, one function. Every control calls setMode() and nothing
+           else touches the classes, because a panel that can be hidden by one
+           flag and sized by another eventually ends up invisible and still
+           taking space. The previous version had exactly that bug: a class rule
+           for the collapsed width and an inline property that outranked it.
+
+             closed   not in the DOM flow, costs nothing
+             dock     a row at the bottom of the main column, the default
+             float    an overlay, for when it needs to be big for a moment
+             pop      its own always-on-top window
+
+           Float and pop are deliberately exclusive. Two ways to be somewhere
+           else is two ways to lose it. */
+        let WB = "closed", WBPOP = null;
+
+        function setMode(m) {
+            /* Closing the popped window is what returns the node, so ask the
+               window to close and let its own handler finish the job. */
+            if (WB === "pop" && m !== "pop" && WBPOP && !WBPOP.closed) {
+                WBPOP.close();
+                return;
+            }
+            WB = m;
+            const main = document.getElementById("main");
+            const dock = document.getElementById("dock");
+            main.classList.toggle("dockopen", m === "dock");
+            main.classList.toggle("dockfloat", m === "float");
+            main.classList.toggle("dockpop", m === "pop");
+            dock.classList.toggle("float", m === "float");
+            document.getElementById("wbtoggle").classList.toggle("on", m !== "closed");
+            ["dbdock", "dbfloat"].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) b.classList.remove("on");
+            });
+            if (m === "dock") document.getElementById("dbdock").classList.add("on");
+            if (m === "float") document.getElementById("dbfloat").classList.add("on");
+            if (m === "dock") main.style.setProperty("--h-dock", (LAYOUT.dockH || 340) + "px");
+            else main.style.removeProperty("--h-dock");
+            if (m !== "closed") { drawFiles(); drawPrev(); }
+            paintCollector();
+            LAYOUT.dockMode = m === "pop" ? "dock" : m;
+            saveLayout();
+        }
+
+        function toggleWorkbench() { setMode(WB === "closed" ? "dock" : "closed"); }
+
+        /* Pop out moves the node rather than copying it. A copy needs its own
+           state, and an unsaved edit in one window beside a stale copy in the
+           other is a way to lose work. Moving the node keeps the textarea, its
+           contents and every handler intact. Same approach as the focus timer. */
+        async function popWorkbench() {
+            if (!window.documentPictureInPicture) return;
+            const dock = document.getElementById("dock");
+            const w = await documentPictureInPicture.requestWindow({ width: 940, height: 580 });
+            [...document.styleSheets].forEach(ss => {
+                try {
+                    const css = [...ss.cssRules].map(r => r.cssText).join("");
+                    const el = w.document.createElement("style");
+                    el.textContent = css;
+                    w.document.head.appendChild(el);
+                } catch (e) { /* cross-origin sheet, nothing to copy */ }
+            });
+            w.document.body.classList.add("wbpip");
+            w.document.body.style.margin = "0";
+            w.document.body.appendChild(dock);
+            dock.classList.remove("float");
+            WBPOP = w;
+            setMode("pop");
+            w.addEventListener("pagehide", () => {
+                document.getElementById("main").appendChild(dock);
+                WBPOP = null;
+                WB = "float";     /* so setMode does not try to close it again */
+                setMode("dock");
+            });
+        }
+
+        /* Only visible when the workbench is not where you left it. */
+        function paintCollector() {
+            const away = WB === "float" || WB === "pop";
+            const box = document.getElementById("collector");
+            box.hidden = !away;
+            if (!away) { document.getElementById("comenu").hidden = true; return; }
+            document.getElementById("colabel").textContent =
+                WB === "pop" ? "Workbench in its own window" : "Workbench floating";
+            document.getElementById("colist").innerHTML =
+                `<div class="corow"><span>Workbench</span>
+           <span style="display:flex;gap:7px;align-items:center">
+             <span class="why">${WB}</span>
+             <button class="sm" onclick="setMode('dock')">Bring back</button>
+           </span></div>`;
+        }
+
+        /* ---- the viewer: open, read, edit, save ----
            Read and write go through the server, which allows only paths inside
            a folder this board already declares. The browser sends a path; it
-           does not get to choose what counts as reachable.
-
-           The panel is a sibling of the main column, not a card inside it, so
-           opening a file does not push the project you were reading off the
-           screen. That was the first version and it was the wrong shape: a
-           preview that displaces the thing it is previewing for. */
+           does not get to choose what counts as reachable. */
         let FILE = null, FILE_DIRTY = false, FILE_SRC = false;
 
         async function openFile(path) {
@@ -3147,7 +3654,8 @@
                 TOUCHED[SEL] = TOUCHED[SEL].filter(p => p !== path);
                 markTouched();
             }
-            showPrev(true); drawPrev();
+            if (WB === "closed") setMode("dock");
+            drawPrev();
             const r = await fetch("/api/file?path=" + encodeURIComponent(path));
             const d = await r.json();
             FILE = r.ok ? d : { path, error: d.error || "could not open" };
@@ -3158,18 +3666,7 @@
 
         function closeFile() {
             if (FILE_DIRTY && !confirm("Unsaved changes will be lost. Close anyway?")) return;
-            FILE = null; FILE_DIRTY = false; showPrev(false); drawPrev();
-        }
-
-        /* The panel takes width only while something is in it. An empty third
-           of the screen is worse than no panel. */
-        function showPrev(on) {
-            const app = document.getElementById("app");
-            app.classList.toggle("noprev", !on);
-            /* An inline custom property outranks the .noprev class rule, so
-               closing has to remove it rather than rely on the class. */
-            if (on) app.style.setProperty("--w-prev", (LAYOUT.prev || 560) + "px");
-            else app.style.removeProperty("--w-prev");
+            FILE = null; FILE_DIRTY = false; drawPrev();
         }
 
         function fileDirty() {
@@ -3582,14 +4079,20 @@
         <td class="num">${t.effort_h ? t.effort_h + "h" : ""}</td>
         <td>${t.urgent ? '<span class="chip" style="background:var(--stop)">urgent</span>' : ""}
             ${t.important ? '<span class="chip" style="background:var(--warn)">important</span>' : ""}</td>
-        <td>${t.status === "open" || t.status === "doing"
-                        ? `<select class="ed" style="width:auto;padding:3px 6px"
+        <td>${t.status === "validate"
+                        ? '<span class="chip" style="background:var(--info)">validate</span>'
+                        : t.status === "open" || t.status === "doing"
+                            ? `<select class="ed" style="width:auto;padding:3px 6px"
               onchange="taskField('${t.id}','status',this.value)">
-              ${["open", "doing", "done"].map(s => `<option${t.status === s ? " selected" : ""}>${s}</option>`).join("")}
+              ${["open", "doing", "validate", "done"].map(s => `<option${t.status === s ? " selected" : ""}>${s}</option>`).join("")}
             </select>`
-                        : esc(t.status)}</td>
-        <td>${t.status === "open" || t.status === "doing"
-                        ? `<button class="vb" onclick="editTask('${t.id}')" title="Correct the wording, date or estimate">Edit</button>
+                            : esc(t.status)}</td>
+        <td>${t.status === "validate"
+                        ? `<button class="vb pri" onclick="taskField('${t.id}','status','done')" title="Mark it done after you have checked it">Accept</button>
+               <button class="vb" onclick="taskField('${t.id}','status','doing')" title="Send it back to active work">Reopen</button>
+               <button class="vb" onclick="editTask('${t.id}')" title="Correct the wording, date or estimate">Edit</button>`
+                        : t.status === "open" || t.status === "doing"
+                            ? `<button class="vb" onclick="editTask('${t.id}')" title="Correct the wording, date or estimate">Edit</button>
                <button class="vb" onclick="focusTask('${t.id}')" title="Point the focus timer at this">Focus</button>
                <button class="vb" onclick="briefTask('${t.id}')" title="Load a draft instruction into chat">Ask</button>
                <button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>` : ""}</td>
@@ -3930,11 +4433,85 @@
         function reveal(p) { fetch("/api/open?path=" + encodeURIComponent(p)); }
 
         /* ---- focus timer: picking is part of the tool ---- */
-        const WORK_LEN = 25 * 60;
-        const BREAK_LEN = 5 * 60;
-        const LUNCH_LEN = 30 * 60;
-        const WORKS_PER_LUNCH = 4;
-        let LEN = WORK_LEN, left = LEN, phase = "work", sessions = 0, warned1m = false, tick = null, task = null;
+        const TIMER_PREF_KEY = "hiveframe.focus.prefs";
+        const TIMER_PREF_DEFAULTS = {
+            alerts: true,
+            autoStart: true,
+            workMin: 25,
+            breakMin: 5,
+            lunchMin: 30,
+            sessionsPerLunch: 4
+        };
+        let TIMER_PREFS = Object.assign({}, TIMER_PREF_DEFAULTS);
+        try { TIMER_PREFS = Object.assign({}, TIMER_PREF_DEFAULTS, JSON.parse(localStorage.getItem(TIMER_PREF_KEY) || "{}")); } catch (e) { }
+        function normalizeTimerPrefs() {
+            TIMER_PREFS.alerts = TIMER_PREFS.alerts !== false;
+            TIMER_PREFS.autoStart = TIMER_PREFS.autoStart !== false;
+            TIMER_PREFS.workMin = Math.max(5, Math.round(Number(TIMER_PREFS.workMin) || TIMER_PREF_DEFAULTS.workMin));
+            TIMER_PREFS.breakMin = Math.max(1, Math.round(Number(TIMER_PREFS.breakMin) || TIMER_PREF_DEFAULTS.breakMin));
+            TIMER_PREFS.lunchMin = Math.max(5, Math.round(Number(TIMER_PREFS.lunchMin) || TIMER_PREF_DEFAULTS.lunchMin));
+            TIMER_PREFS.sessionsPerLunch = Math.max(1, Math.round(Number(TIMER_PREFS.sessionsPerLunch) || TIMER_PREF_DEFAULTS.sessionsPerLunch));
+        }
+        function saveTimerPrefs() {
+            normalizeTimerPrefs();
+            try { localStorage.setItem(TIMER_PREF_KEY, JSON.stringify(TIMER_PREFS)); } catch (e) { }
+            paintTimerPrefs();
+        }
+        function phaseLen(kind) {
+            const mins = kind === "break" ? TIMER_PREFS.breakMin : kind === "lunch" ? TIMER_PREFS.lunchMin : TIMER_PREFS.workMin;
+            return mins * 60;
+        }
+        function timerPrefsSummary() {
+            return `Alerts ${TIMER_PREFS.alerts ? "on" : "off"} · Auto-start ${TIMER_PREFS.autoStart ? "on" : "off"} · ${TIMER_PREFS.workMin}/${TIMER_PREFS.breakMin}/${TIMER_PREFS.lunchMin}m · ${TIMER_PREFS.sessionsPerLunch} sessions per lunch`;
+        }
+        function paintTimerPrefs() {
+            const doc = focusDoc();
+            const sum = doc.getElementById("prefsum");
+            if (sum) sum.textContent = timerPrefsSummary();
+            const box = doc.getElementById("prefs");
+            const btn = doc.getElementById("preftoggle");
+            if (btn) btn.textContent = box && box.classList.contains("open") ? "Hide timer settings" : "Timer settings";
+        }
+        function fillTimerPrefsFields() {
+            const doc = focusDoc();
+            const set = (id, value) => {
+                const el = doc.getElementById(id);
+                if (!el) return;
+                if (el.type === "checkbox") el.checked = !!value;
+                else el.value = String(value);
+            };
+            set("pref-alerts", TIMER_PREFS.alerts);
+            set("pref-autostart", TIMER_PREFS.autoStart);
+            set("pref-work", TIMER_PREFS.workMin);
+            set("pref-break", TIMER_PREFS.breakMin);
+            set("pref-lunch", TIMER_PREFS.lunchMin);
+            set("pref-sessions", TIMER_PREFS.sessionsPerLunch);
+        }
+        function paintTimerPrefsFields() {
+            fillTimerPrefsFields();
+            paintTimerPrefs();
+        }
+        function toggleTimerPrefs() {
+            const box = focusDoc().getElementById("prefs");
+            if (!box) return;
+            box.classList.toggle("open");
+            paintTimerPrefsFields();
+        }
+        function readTimerPrefs() {
+            const doc = focusDoc();
+            const get = id => doc.getElementById(id);
+            TIMER_PREFS.alerts = !!get("pref-alerts")?.checked;
+            TIMER_PREFS.autoStart = !!get("pref-autostart")?.checked;
+            TIMER_PREFS.workMin = Number(get("pref-work")?.value || TIMER_PREF_DEFAULTS.workMin);
+            TIMER_PREFS.breakMin = Number(get("pref-break")?.value || TIMER_PREF_DEFAULTS.breakMin);
+            TIMER_PREFS.lunchMin = Number(get("pref-lunch")?.value || TIMER_PREF_DEFAULTS.lunchMin);
+            TIMER_PREFS.sessionsPerLunch = Number(get("pref-sessions")?.value || TIMER_PREF_DEFAULTS.sessionsPerLunch);
+            saveTimerPrefs();
+            paintTimerPrefsFields();
+            if (!tick) syncTimerLength();
+        }
+        normalizeTimerPrefs();
+        let LEN = phaseLen("work"), left = LEN, phase = "work", sessions = 0, warned1m = false, tick = null, task = null;
         let FOCUS_SCOPE = "task";
         const LAST_TASK_KEY = "hiveframe.focus.lasttask";
         let LAST_TASK_BY_PROJECT = {};
@@ -3947,10 +4524,6 @@
         function focusDoc() {
             const f = focusNode();
             return f && f.ownerDocument ? f.ownerDocument : document;
-        }
-
-        function phaseLen(kind) {
-            return kind === "break" ? BREAK_LEN : kind === "lunch" ? LUNCH_LEN : WORK_LEN;
         }
 
         function phaseName(kind) {
@@ -3988,10 +4561,12 @@
         }
 
         function warnChime() {
+            if (!TIMER_PREFS.alerts) return;
             beep(988, 120, 0, 0.06, "square");
         }
 
         function doneChime() {
+            if (!TIMER_PREFS.alerts) return;
             beep(784, 120, 0, 0.05, "square");
             beep(988, 120, 180, 0.05, "square");
         }
@@ -4051,12 +4626,13 @@
             if (go) go.textContent = tick ? "Pause" : (left < LEN ? "Resume" : "Start");
             const lunch = doc.getElementById("lunch");
             if (lunch) lunch.textContent = "Lunch";
+            paintTimerPrefsFields();
         }
 
         function advancePhase() {
             if (phase === "work") {
                 sessions += 1;
-                phase = sessions % WORKS_PER_LUNCH === 0 ? "lunch" : "break";
+                phase = sessions % TIMER_PREFS.sessionsPerLunch === 0 ? "lunch" : "break";
             } else {
                 phase = "work";
             }
@@ -4064,6 +4640,10 @@
             left = LEN;
             warned1m = false;
             doneChime();
+            if (!TIMER_PREFS.autoStart) {
+                stopTicker();
+                return;
+            }
             updateFocusUi();
             saveFocusState();
         }
@@ -4126,7 +4706,7 @@
             while (remaining <= 0) {
                 if (phase === "work") {
                     sessions += 1;
-                    phase = sessions % WORKS_PER_LUNCH === 0 ? "lunch" : "break";
+                    phase = sessions % TIMER_PREFS.sessionsPerLunch === 0 ? "lunch" : "break";
                 } else {
                     phase = "work";
                 }
@@ -4148,6 +4728,15 @@
             if (ctx) ctx.textContent = focusLabelFromState(s);
             updateFocusUi();
             if (started && s.running) startTicker();
+        }
+
+        function syncTimerLength() {
+            const next = phaseLen(phase);
+            const snap = left === LEN || left === 0;
+            LEN = next;
+            if (snap) left = next;
+            updateFocusUi();
+            saveFocusState();
         }
 
         function restoreFocusState() {
@@ -4177,8 +4766,8 @@
             BOARD.projects.slice(0, 3).forEach(p => {
                 /* Never offer a task that is waiting on a sibling. A candidate you cannot
                    start is worse than no candidate: it costs a decision and returns nothing. */
-                const openIds = new Set(p.tasks.filter(x => x.status === "open" || x.status === "doing").map(x => x.id));
-                const t = p.tasks.find(x => (x.status === "open" || x.status === "doing")
+                const openIds = new Set(p.tasks.filter(taskWorkable).map(x => x.id));
+                const t = p.tasks.find(x => taskWorkable(x)
                     && !(x.blocked_by || []).some(d => openIds.has(d)));
                 if (t) out.push({ p, t });
             });
@@ -4243,7 +4832,7 @@
             if (!p) return;
             if (FOCUS_SCOPE === "project") {
                 const saved = LAST_TASK_BY_PROJECT[p.id];
-                const next = saved || (p.tasks || []).find(x => x.status === "open" || x.status === "doing");
+                const next = saved || (p.tasks || []).find(taskWorkable);
                 if (next) {
                     focusTask(next.id);
                     return;
@@ -4260,20 +4849,27 @@
             const b = doc.getElementById("go");
             if (!b) return;
             if (tick) { stopTicker(); return; }
-            await armAudio();
+            if (TIMER_PREFS.alerts) await armAudio();
             startTicker();
         };
         document.getElementById("lunch").onclick = async () => {
-            await armAudio();
+            if (TIMER_PREFS.alerts) await armAudio();
             setManualPhase("lunch");
             if (!tick) startTicker();
         };
         document.getElementById("projfocus").onclick = () => {
             toggleFocusScope();
         };
+        document.getElementById("preftoggle").onclick = toggleTimerPrefs;
+        ["pref-alerts", "pref-autostart", "pref-work", "pref-break", "pref-lunch", "pref-sessions"].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener("change", readTimerPrefs);
+        });
+        paintTimerPrefs();
         document.getElementById("reset").onclick = () => {
             const doc = focusDoc();
-            if (tick) clearInterval(tick); tick = null; phase = "work"; sessions = 0; LEN = WORK_LEN; left = LEN; warned1m = false; updateFocusUi();
+            if (tick) clearInterval(tick); tick = null; phase = "work"; sessions = 0; LEN = phaseLen("work"); left = LEN; warned1m = false; updateFocusUi();
             const b = doc.getElementById("go");
             if (b) b.textContent = "Start";
             clearFocusState();
@@ -4284,15 +4880,15 @@
             document.getElementById("fold").textContent = f.classList.contains("collapsed") ? "+" : "-";
         };
 
-/* ---- moving the focus panel ----
-           It floats over the page, so wherever it is parked it is in front of
-           something. Three answers, in order of how far you want it to go:
-           drag it, pop it into its own always-on-top window, or put it back.
-
-           Dragging writes left and top and clears the bottom anchor, because a
-           panel pinned to two opposite edges cannot move. The spot is saved,
-           and clamped on load, so a panel dragged to a corner of a wide display
-           does not come back off-screen on a laptop. */
+        /* ---- moving the focus panel ----
+                   It floats over the page, so wherever it is parked it is in front of
+                   something. Three answers, in order of how far you want it to go:
+                   drag it, pop it into its own always-on-top window, or put it back.
+        
+                   Dragging writes left and top and clears the bottom anchor, because a
+                   panel pinned to two opposite edges cannot move. The spot is saved,
+                   and clamped on load, so a panel dragged to a corner of a wide display
+                   does not come back off-screen on a laptop. */
         const SPOT_KEY = "hiveframe.focusspot";
 
         function placeFocus(x, y) {
@@ -4511,16 +5107,19 @@
            40px is not a small panel, it is a panel you have lost, and the
            handle to recover it is 40px wide. */
         const LAYOUT_KEY = "hiveframe.layout";
-        const LIMITS = { rail: [200, 460], prev: [320, 1100], chat: [300, 720] };
-        let LAYOUT = { rail: 290, prev: 560, chat: 380, chatOpen: true };
+        const LIMITS = { rail: [200, 460], sel: [150, 520], chat: [300, 720] };
+        let LAYOUT = {
+            rail: 290, sel: 230, chat: 380, chatOpen: true,
+            dockH: 340, dockMode: "closed"
+        };
 
         function applyLayout() {
             const app = document.getElementById("app");
             app.style.setProperty("--w-rail", LAYOUT.rail + "px");
             app.style.setProperty("--w-chat", LAYOUT.chat + "px");
-            if (!app.classList.contains("noprev"))
-                app.style.setProperty("--w-prev", LAYOUT.prev + "px");
             app.classList.toggle("nochat", !LAYOUT.chatOpen);
+            const body = document.querySelector(".dbody");
+            if (body) body.style.setProperty("--w-sel", LAYOUT.sel + "px");
         }
 
         function saveLayout() {
@@ -4531,26 +5130,36 @@
         function loadLayout() {
             try {
                 const s = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
-                ["rail", "prev", "chat"].forEach(k => {
+                ["rail", "sel", "chat"].forEach(k => {
                     if (typeof s[k] === "number") {
                         const [lo, hi] = LIMITS[k];
                         LAYOUT[k] = Math.min(hi, Math.max(lo, s[k]));
                     }
                 });
                 if (typeof s.chatOpen === "boolean") LAYOUT.chatOpen = s.chatOpen;
+                if (typeof s.dockH === "number") LAYOUT.dockH = Math.min(900, Math.max(160, s.dockH));
+                /* Never restore into pop: the window is gone, and a mode whose
+                   window does not exist is a panel you cannot reach. */
+                if (s.dockMode === "dock" || s.dockMode === "float") LAYOUT.dockMode = s.dockMode;
             } catch (e) { }
             applyLayout();
         }
 
-        document.querySelectorAll(".gutter").forEach(g => {
+        /* The selector splitter lives inside the dock and writes to the dock's
+           own grid, so the target element is per-handle rather than always the
+           app shell. Everything else about the drag is identical. */
+        document.querySelectorAll(".gutter, .dsplit").forEach(g => {
             g.addEventListener("pointerdown", ev => {
                 const key = g.dataset.drag;
-                const app = document.getElementById("app");
+                const target = key === "sel"
+                    ? document.querySelector(".dbody")
+                    : document.getElementById("app");
+                if (!target) return;
                 const start = ev.clientX;
                 const from = LAYOUT[key];
-                /* The rail grows to the right, the other two grow to the left,
-                   because they sit on the far side of the handle. */
-                const dir = key === "rail" ? 1 : -1;
+                /* The rail and the file selector grow to the right; the panels
+                   on the far side of their handle grow to the left. */
+                const dir = (key === "rail" || key === "sel") ? 1 : -1;
                 const [lo, hi] = LIMITS[key];
 
                 g.classList.add("dragging");
@@ -4560,7 +5169,7 @@
                 const move = e => {
                     const w = Math.min(hi, Math.max(lo, from + dir * (e.clientX - start)));
                     LAYOUT[key] = w;
-                    app.style.setProperty("--w-" + key, w + "px");
+                    target.style.setProperty("--w-" + key, w + "px");
                 };
                 const up = e => {
                     g.releasePointerCapture(ev.pointerId);
@@ -4576,10 +5185,78 @@
             });
         });
 
+        /* The dock's own handle drags vertically, so it is a separate loop
+           rather than another entry in the horizontal set above. */
+        (() => {
+            const g = document.getElementById("dockgrip");
+            if (!g) return;
+            g.addEventListener("pointerdown", ev => {
+                const main = document.querySelector(".main");
+                const start = ev.clientY;
+                const from = LAYOUT.dockH;
+                g.classList.add("dragging");
+                document.body.classList.add("dragging");
+                g.setPointerCapture(ev.pointerId);
+                const move = e => {
+                    const lo = 160, hi = Math.max(lo, innerHeight - 220);
+                    const h = Math.min(hi, Math.max(lo, from - (e.clientY - start)));
+                    LAYOUT.dockH = h;
+                    main.style.setProperty("--h-dock", h + "px");
+                };
+                const up = () => {
+                    g.classList.remove("dragging");
+                    document.body.classList.remove("dragging");
+                    g.removeEventListener("pointermove", move);
+                    g.removeEventListener("pointerup", up);
+                    saveLayout();
+                };
+                g.addEventListener("pointermove", move);
+                g.addEventListener("pointerup", up);
+                ev.preventDefault();
+            });
+        })();
+
+        /* Workbench controls. Each one routes through setMode so there is a
+           single place that decides where the dock lives. */
+        document.getElementById("wbtoggle").onclick = toggleWorkbench;
+        document.getElementById("dbdock").onclick = () => setMode("dock");
+        document.getElementById("dbfloat").onclick = () => setMode("float");
+        document.getElementById("dbclose").onclick = () => setMode("closed");
+        document.getElementById("cobtn").onclick = () => {
+            const m = document.getElementById("comenu");
+            m.hidden = !m.hidden;
+        };
+        /* Pop-out needs a browser API that is not everywhere. Rather than
+           offer a button that fails, drop it when the API is absent. */
+        (() => {
+            const b = document.getElementById("dbpop");
+            if (!b) return;
+            if (!("documentPictureInPicture" in window)) { b.remove(); return; }
+            b.onclick = popWorkbench;
+        })();
+        document.getElementById("dfilt").oninput = e => {
+            FILTER = e.target.value.trim().toLowerCase();
+            drawFiles();
+        };
+
+        /* F opens and closes the workbench, Escape brings a floating dock back
+           in. Both stand down while the caret is in a field. */
+        addEventListener("keydown", e => {
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+            const t = e.target;
+            if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+            if (t && t.isContentEditable) return;
+            if (e.key === "f" || e.key === "F") { toggleWorkbench(); e.preventDefault(); }
+            else if (e.key === "Escape" && WB === "float") { setMode("dock"); }
+        });
+
         loadLayout();
         restoreFocusState();
         addEventListener("beforeunload", () => { if (tick || PENDING_FOCUS) saveFocusState(); });
         paint(); load(); loadChat();
+        /* Restored last so the dock opens against a painted board. A popped
+           window is never restored, because the window itself is gone. */
+        if (LAYOUT.dockMode === "dock" || LAYOUT.dockMode === "float") setMode(LAYOUT.dockMode);
     </script>
 </body>
 

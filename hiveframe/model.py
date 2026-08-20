@@ -119,7 +119,7 @@ class Artifact:
 class Task:
     id: str
     title: str
-    status: str = "open"          # open | doing | done | dropped
+    status: str = "open"          # open | doing | validate | done | dropped
     due: date | None = None
     effort_h: float = 0.0
     urgent: bool = False
@@ -130,6 +130,10 @@ class Task:
 
     @property
     def open(self) -> bool:
+        return self.status in ("open", "doing", "validate")
+
+    @property
+    def workable(self) -> bool:
         return self.status in ("open", "doing")
 
     def days_left(self, today: date | None = None) -> int | None:
@@ -280,6 +284,10 @@ class Project:
         return [t for t in self.tasks if t.open]
 
     @property
+    def workable_tasks(self) -> list[Task]:
+        return [t for t in self.tasks if t.workable]
+
+    @property
     def open_effort_h(self) -> float:
         return sum(t.effort_h for t in self.open_tasks)
 
@@ -290,14 +298,14 @@ class Project:
         These are the moves available right now. A project can be blocked and
         still have several of them, which is the whole point of the distinction.
         """
-        open_ids = {t.id for t in self.open_tasks}
-        return [t for t in self.open_tasks
+        open_ids = {t.id for t in self.workable_tasks}
+        return [t for t in self.workable_tasks
                 if not any(dep in open_ids for dep in t.blocked_by)]
 
     @property
     def stalled(self) -> bool:
         """Live, has open work, and no move available. Nothing I can do today."""
-        return bool(self.open_tasks) and not self.actionable_tasks
+        return bool(self.workable_tasks) and not self.actionable_tasks
 
     @property
     def confirmed_relations(self) -> list[Relation]:

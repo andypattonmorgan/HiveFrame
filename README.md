@@ -228,8 +228,8 @@ data. Sanitised data is not used, because sanitised data leaks.
 ## Status
 
 Phase 4. Project model, project view with in-place editing, brief, triage with
-verdicts, tool registry with a reverse dependency index, capacity, focus timer,
-interruption capture.
+verdicts, tool registry with a reverse dependency index, capacity, configurable
+focus timer, interruption capture.
 
 Not yet built: connector-fed brief, the relation graph, project-bound chat,
 session logging and effort calibration, and sub-project rows so individual
