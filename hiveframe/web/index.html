@@ -416,6 +416,46 @@
             padding: 2px 4px
         }
 
+        .fmode {
+            background: #20252f;
+            color: var(--dim);
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            font: inherit;
+            font-size: 11px;
+            min-width: 136px;
+            padding: 2px 4px
+        }
+
+        .ftbar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin: 6px 0 8px
+        }
+
+        .ftbar .dst {
+            color: var(--faint);
+            font-size: 11px
+        }
+
+        .dropzone {
+            border: 1px dashed var(--line);
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin: 8px 0;
+            background: #11151a;
+            color: var(--faint);
+            font-size: 12px
+        }
+
+        .dropzone.drag {
+            border-color: var(--acc);
+            background: #171a21;
+            color: var(--ink)
+        }
+
         .ftree .tree-dir>summary {
             padding: 3px 0;
             font-size: 12.5px;
@@ -436,6 +476,24 @@
             height: 7px;
             border-radius: 50%;
             margin-right: 6px
+        }
+
+        .dot.chatdone {
+            width: 9px;
+            height: 9px;
+            margin-right: 7px;
+            background: var(--ok);
+            box-shadow: 0 0 0 2px rgba(67, 191, 84, .12);
+            vertical-align: middle
+        }
+
+        .dot.chatbusy {
+            width: 9px;
+            height: 9px;
+            margin-right: 7px;
+            background: var(--warn);
+            box-shadow: 0 0 0 2px rgba(245, 158, 11, .18);
+            vertical-align: middle
         }
 
         /* ---- main ---- */
@@ -476,6 +534,47 @@
             color: var(--dim);
             background: var(--panel);
             flex: 0 0 auto
+        }
+
+        .chatattach {
+            padding: 8px 14px 0;
+            color: var(--faint);
+            font-size: 11px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center
+        }
+
+        .chatattach .label {
+            text-transform: uppercase;
+            letter-spacing: .06em
+        }
+
+        .atag {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 2px 7px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: #151922;
+            color: var(--ink);
+            font-size: 10.5px;
+            cursor: pointer;
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis
+        }
+
+        .atag:hover {
+            border-color: var(--acc)
+        }
+
+        .atag .x {
+            color: var(--faint);
+            font-size: 11px
         }
 
         .cscroll {
@@ -1161,6 +1260,19 @@
             gap: 8px
         }
 
+        .drow {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px
+        }
+
+        .dqs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px
+        }
+
         .fl {
             display: flex;
             gap: 6px;
@@ -1268,12 +1380,44 @@
             letter-spacing: .02em
         }
 
+        .phase {
+            text-align: center;
+            color: var(--acc);
+            font-size: 11px;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            margin-top: 6px
+        }
+
+        .sessions {
+            text-align: center;
+            color: var(--faint);
+            font-size: 11px;
+            margin-top: 2px;
+            min-height: 14px
+        }
+
         .ctx {
             text-align: center;
             color: var(--dim);
             font-size: 12.5px;
             margin-top: 2px;
             min-height: 18px
+        }
+
+        .scopebar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            justify-content: center
+        }
+
+        .scope {
+            color: var(--faint);
+            font-size: 11.5px;
+            letter-spacing: .04em;
+            text-transform: uppercase
         }
 
         .cands {
@@ -1408,9 +1552,11 @@
                 <i class="hex" style="width:12px;height:14px"></i>
                 <b>Ask</b>
                 <span class="spacer"></span>
-                <button class="mini" id="cnew" title="Start a fresh conversation">New</button>
+                <button class="mini" id="cnew"
+                    title="Drop the thread. The next question is sent alone, with no history behind it.">Clear</button>
             </div>
             <div class="cctx" id="cctx">Checking...</div>
+            <div class="chatattach" id="chatattach"></div>
             <div class="cscroll" id="cscroll"></div>
             <div class="cfoot">
                 <div class="cgrip" id="cgrip" title="Drag to resize the message box"></div>
@@ -1437,10 +1583,17 @@
         </div>
         <div class="fbody">
             <div class="clock" id="clock">25:00</div>
+            <div class="phase" id="phase">Work</div>
+            <div class="sessions" id="sessions">0 work sessions complete</div>
             <div class="ctx" id="ctx">Nothing selected</div>
+            <div class="scopebar">
+                <span class="scope" id="scope">Task focus</span>
+                <button class="sm" id="projfocus" title="Point the timer at the whole project">Project</button>
+            </div>
             <div class="cands" id="cands"></div>
             <div class="frow">
                 <button class="btn" id="go">Start</button>
+                <button class="btn ghost" id="lunch">Lunch</button>
                 <button class="btn ghost" id="reset">Reset</button>
             </div>
             <div class="caplbl">Interruption. Type it, keep going.</div>
@@ -1525,10 +1678,27 @@
             if (TFILTERS.some(f => f[0] === saved)) TFILTER = saved;
         } catch (e) { }
 
+        const IMPORT_KEY = "hiveframe.importmode";
+        let IMPORT_MODE = "project";
+        let IMPORT_MODE_SAVED = false;
+        try {
+            const saved = localStorage.getItem(IMPORT_KEY);
+            if (saved === "task" || saved === "project") {
+                IMPORT_MODE = saved;
+                IMPORT_MODE_SAVED = true;
+            }
+        } catch (e) { }
+
         function setTaskFilter(k) {
             TFILTER = k;
             try { localStorage.setItem(TFILTER_KEY, k); } catch (e) { }
             draw();
+        }
+
+        function setImportMode(k) {
+            IMPORT_MODE = k === "task" ? "task" : "project";
+            IMPORT_MODE_SAVED = true;
+            try { localStorage.setItem(IMPORT_KEY, IMPORT_MODE); } catch (e) { }
         }
 
         function taskFilterMatch(t) {
@@ -1555,12 +1725,18 @@
         }
 
         let BOARD = null, SEL = null, VIEW = "project";
+        let PENDING_FOCUS = null;
 
         async function load() {
             const r = await fetch("/api/board?stores=work");
             BOARD = await r.json();
+            if (PENDING_FOCUS && PENDING_FOCUS.projectId && BOARD.projects.some(p => p.id === PENDING_FOCUS.projectId)) {
+                SEL = PENDING_FOCUS.projectId;
+            }
             if (!SEL && BOARD.projects.length) SEL = BOARD.projects[0].id;
+            clearChatDone(SEL);
             drawRail(); draw(); drawCandidates();
+            if (PENDING_FOCUS) hydrateFocusFromBoard();
         }
 
         function proj(id) { return BOARD.projects.find(p => p.id === id); }
@@ -1635,14 +1811,14 @@
         function pitem(p, indent) {
             return `
     <div class="pitem${p.id === SEL ? " on" : ""}${indent ? " sub" : ""}" onclick="pick('${p.id}')">
-      <div class="pname">${p.name}</div>
+      <div class="pname">${hasChatBusy(p.id) ? `<i class="dot chatbusy" title="Chat in progress. An agent is working."></i>` : ""}${hasChatDone(p.id) ? `<i class="dot chatdone" title="Chat completed. Open this project."></i>` : ""}${p.name}</div>
       <div class="pmeta">
         ${p.horizon ? `<span class="hz" title="${HZ_MEANS[p.horizon] || ""}" style="background:${HZ[p.horizon] || "#555"}">${p.horizon}</span>` : ""}
         ${p.kind} · ${p.open_tasks} open${p.next_due ? ` · due ${p.next_due}` : ""}
       </div>
       <div class="pmeta">${p.stalled
-                ? `<span class="chip" style="background:var(--stop)">nothing can start today</span>`
-                : (p.next_move ? `next: ${p.next_move.title}${p.next_move.effort_h ? ` (${p.next_move.effort_h}h)` : ""}` : "")}
+                    ? `<span class="chip" style="background:var(--stop)">nothing can start today</span>`
+                    : (p.next_move ? `next: ${p.next_move.title}${p.next_move.effort_h ? ` (${p.next_move.effort_h}h)` : ""}` : "")}
       </div>
       <div class="pscore" title="Priority score">${p.score}</div>
     </div>`;
@@ -1655,6 +1831,8 @@
             const p = g.head, r = p.rollup || {};
             const closed = !!GROUPS_CLOSED[g.key];
             const bits = [];
+            const busy = g.items.some(x => hasChatBusy(x.id));
+            const done = g.items.some(x => hasChatDone(x.id));
             if (r.children) bits.push(`${r.live || 0} of ${r.children} live`);
             else bits.push("no projects yet");
             if (r.blocked) bits.push(`${r.blocked} blocked`);
@@ -1665,7 +1843,7 @@
       <span class="gtwist">${closed ? "▸" : "▾"}</span>
       <span class="gname${p.id === SEL ? " on" : ""}"
             onclick="event.stopPropagation();pick('${p.id}')"
-            title="Open this program. Click anywhere else on this row to collapse it.">${p.name}</span>
+            title="Open this program. Click anywhere else on this row to collapse it.">${busy ? `<i class="dot chatbusy" title="A child project has an active chat."></i>` : ""}${done ? `<i class="dot chatdone" title="A child project has a finished chat."></i>` : ""}${p.name}</span>
       <span class="gtag">program${closed ? ` · ${g.items.length}` : ""}</span>
       <div class="gmeta">${bits.join(" · ")}</div>
     </div>`;
@@ -1725,6 +1903,7 @@
         function pick(id) {
             if (FILE && FILE_DIRTY && !confirm("Unsaved changes to " + (FILE.rel || FILE.name) + " will be lost. Switch anyway?")) return;
             SEL = id; FILE = null; FILE_DIRTY = false;
+            clearChatDone(id);
             drawRail(); syncChatProject();
             showPrev(false); drawPrev();
             setView("project");
@@ -1734,7 +1913,7 @@
 
         function draw() {
             const el = document.getElementById("view");
-            if (VIEW === "brief") return el.innerHTML = briefView();
+            if (VIEW === "brief") { el.innerHTML = briefView(); loadCarry(); return; }
             if (VIEW === "triage") return el.innerHTML = triageView();
             if (VIEW === "tools") return el.innerHTML = toolsView();
             if (VIEW === "capacity") return el.innerHTML = capView();
@@ -1752,9 +1931,99 @@
            ask about, and by the time you arrive you are describing it from memory. */
 
         let CHAT = null, TURNS = [], CHAT_PROJ = null;
+        let CHAT_BUSY_PROJECT = null;
+        const CHAT_DONE_KEY = "hiveframe.chatdone";
+        let CHAT_DONE = {};
+        try { CHAT_DONE = JSON.parse(localStorage.getItem(CHAT_DONE_KEY) || "{}"); } catch (e) { CHAT_DONE = {}; }
+        const CHAT_ATTACH_KEY = "hiveframe.chatattachments";
+        let CHAT_ATTACH = {};
+        try { CHAT_ATTACH = JSON.parse(localStorage.getItem(CHAT_ATTACH_KEY) || "{}"); } catch (e) { CHAT_ATTACH = {}; }
         /* Keyed by project id: the tree follows focus, so one cached copy of
            "everything" would be the bleed this view exists to prevent. */
         let TREE = {};
+
+        function hasChatDone(id) {
+            return !!(id && CHAT_DONE[id]);
+        }
+
+        function hasChatBusy(id) {
+            return !!(id && CHAT_BUSY_PROJECT === id);
+        }
+
+        function setChatBusy(id) {
+            CHAT_BUSY_PROJECT = id || null;
+            drawRail();
+        }
+
+        function clearChatDone(id) {
+            if (!id || !CHAT_DONE[id]) return;
+            delete CHAT_DONE[id];
+            try { localStorage.setItem(CHAT_DONE_KEY, JSON.stringify(CHAT_DONE)); } catch (e) { }
+        }
+
+        function treeHasPath(node, target) {
+            if (!node || !target) return false;
+            if (node.kind === "file" && node.path === target) return true;
+            return (node.children || []).some(child => treeHasPath(child, target));
+        }
+
+        function chatAttachList(id = SEL) {
+            const list = id && Array.isArray(CHAT_ATTACH[id]) ? CHAT_ATTACH[id] : [];
+            const tree = id && TREE[id];
+            if (!tree || !tree.roots) return list;
+            return list.filter(p => (tree.roots || []).some(r => treeHasPath(r.tree, p)));
+        }
+
+        function saveChatAttach() {
+            try { localStorage.setItem(CHAT_ATTACH_KEY, JSON.stringify(CHAT_ATTACH)); } catch (e) { }
+        }
+
+        function setChatAttach(paths, id = SEL) {
+            if (!id) return;
+            const uniq = [];
+            (paths || []).forEach(p => {
+                if (p && !uniq.includes(p)) uniq.push(p);
+            });
+            if (uniq.length) CHAT_ATTACH[id] = uniq;
+            else delete CHAT_ATTACH[id];
+            saveChatAttach();
+            paintChatAttach();
+        }
+
+        function addChatAttach(paths, id = SEL) {
+            if (!id || !paths || !paths.length) return;
+            const cur = chatAttachList(id);
+            const next = cur.slice();
+            paths.forEach(p => { if (p && !next.includes(p)) next.push(p); });
+            setChatAttach(next, id);
+        }
+
+        function clearChatAttach(id = SEL) {
+            if (!id || !CHAT_ATTACH[id]) return;
+            delete CHAT_ATTACH[id];
+            saveChatAttach();
+            paintChatAttach();
+        }
+
+        function paintChatAttach() {
+            const el = document.getElementById("chatattach");
+            if (!el) return;
+            const list = chatAttachList();
+            if (!list.length) {
+                el.innerHTML = "";
+                return;
+            }
+            el.innerHTML = `<span class="label">Pasted files</span>` +
+                list.map(p => `<span class="atag" title="${esc(p)}" onclick="openFile(${JSON.stringify(p)})">${esc((p.split("/").pop() || p))}<span class="x">↗</span></span>`).join("") +
+                `<span class="atag" title="Clear pasted file context" onclick="clearChatAttach()">Clear</span>`;
+        }
+
+        function markChatDone(id) {
+            if (!id) return;
+            CHAT_DONE[id] = Date.now();
+            try { localStorage.setItem(CHAT_DONE_KEY, JSON.stringify(CHAT_DONE)); } catch (e) { }
+            drawRail();
+        }
 
         /* Answers are model output rendered into the page, so they are escaped.
            Trusting a generated string as HTML is how a helpful tool becomes an
@@ -1881,6 +2150,13 @@
                 const orphan = (BOARD.tools || []).filter(t => !(t.used_by || []).length).map(t => t.id);
                 L.push(`${(BOARD.tools || []).length} tools. Unused: ${orphan.join(" ") || "none"}`);
             }
+            const attach = chatAttachList();
+            if (attach.length) {
+                L.push("Pasted chat files:");
+                attach.forEach(p => L.push(`- ${p}`));
+            }
+            if (VIEW === "brief" && MORNING_DATA)
+                L.push(...morningDataContext());
             /* The permission, stated once. Without it the assistant declines
                work it can do and then invents a path, which reads as
                instructions and is worse than refusing. */
@@ -1898,6 +2174,7 @@
         }
 
         function paintCtx() {
+            paintChatAttach();
             const el = document.getElementById("cctx");
             if (!el || !CHAT) return;
             if (!CHAT.cli.ok) { el.textContent = "Copilot CLI not found"; return; }
@@ -2109,6 +2386,7 @@
             const scroll = document.getElementById("cscroll");
             const atBottom = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 60;
             let text = "", last = null, stick = true;
+            setChatBusy(watchId);
             chatBusy(true);
 
             let r;
@@ -2123,6 +2401,7 @@
             } catch (e) {
                 aEl.textContent = "Could not reach HiveFrame: " + e;
                 chatBusy(false);
+                setChatBusy(null);
                 return;
             }
 
@@ -2135,6 +2414,7 @@
                 if (d.type === "error") {
                     aEl.textContent = d.error;
                     document.getElementById("cstat").textContent = "Failed";
+                    setChatBusy(null);
                     return;
                 }
                 if (d.type === "step") {
@@ -2165,6 +2445,8 @@
                         (d.stopped ? " · stopped" : "");
                     node.appendChild(meta);
                     TURNS.push(d);
+                    if (watchId && watchId !== SEL) markChatDone(watchId);
+                    setChatBusy(null);
                 }
             };
 
@@ -2189,6 +2471,7 @@
 
             RUN = null;
             chatBusy(false);
+            setChatBusy(null);
             paintCtx();
             markChangedFiles(watchId, before);
         }
@@ -2340,6 +2623,323 @@
             await load(); draw(); loadLog();
         }
 
+        /* The briefing output outlives a re-render. Views are rebuilt from
+           scratch on every paint, so anything not held here disappears the
+           moment something else on the board changes. */
+        let MORNING_MD = "", MORNING_STAT = "", MORNING_DATA = null;
+        let MORNING_SUMMARY = "", MORNING_SUMMARY_STAT = "", MORNING_SUMMARY_META = "";
+
+        function renderMorningBrief() {
+            if (!MORNING_MD) return `<p class="empty">Not run yet today.</p>`;
+            let text = MORNING_MD;
+            if (MORNING_SUMMARY.trim()) {
+                text = text.replace(
+                    /## 🎯 Focus & Top 3\s+> _Garfield fills this in: lead with today's focus, end with the top 3 priorities\._\s+---/,
+                    `## 🎯 Focus & Top 3\n\n${MORNING_SUMMARY.trim()}\n\n---`
+                );
+            }
+            return md(text);
+        }
+
+        function morningSummaryHtml() {
+            const status = MORNING_SUMMARY_STAT ? `<span class="why">${esc(MORNING_SUMMARY_STAT)}</span>` : "";
+            if (!MORNING_DATA)
+                return `<p class="empty">Run Good morning first, then ask Garfield to draft the summary.</p>`;
+            if (!MORNING_SUMMARY)
+                return `<p class="empty">The briefing data is here. Ask Garfield to draft the Focus and Top 3 from it.</p>`;
+            const meta = MORNING_SUMMARY_META ? `<div class="why" style="margin-top:8px">${esc(MORNING_SUMMARY_META)}</div>` : "";
+            return `<div>${status ? `<div style="margin-bottom:8px">${status}</div>` : ""}${md(MORNING_SUMMARY)}${meta}</div>`;
+        }
+
+        function morningDataHtml() {
+            if (!MORNING_DATA)
+                return `<p class="empty">Run it to give Garfield the source data for the summary.</p>`;
+            const d = MORNING_DATA;
+            const cf = (d.carry_forward && d.carry_forward.items) || [];
+            const m = d.m365 || {};
+            const email = m.email || {};
+            const jira = d.jira || [];
+            const notes = d.recent_notes || [];
+            const personal = d.personal || [];
+            const escWhy = s => `<span class="why">${esc(s)}</span>`;
+            const cfHtml = cf.length ? `<ul>${cf.slice(0, 5).map(x =>
+                `<li><b>${esc(x.heading || "Carry-forward")}</b>: ${esc(x.text)} ${x.due_state ? escWhy(`${x.due_state}${x.due ? " " + x.due : ""}`) : ""}</li>`).join("")}</ul>`
+                : `<p class="empty">No carry-forward items.</p>`;
+            const jiraHtml = jira.length ? `<ul>${jira.map(row => row.available
+                ? `<li><b>${esc(row.name || row.key)}</b>: ${row.blockers_count} blocker(s), ${row.overdue_count} overdue, sample ${row.open_sample}</li>`
+                : `<li><b>${esc(row.key)}</b>: ${esc(row.error || "unavailable")}</li>`).join("")}</ul>`
+                : `<p class="empty">No Jira projects in this run.</p>`;
+            const notesHtml = notes.length ? `<ul>${notes.slice(0, 6).map(n =>
+                `<li><b>${esc(n.date)}</b> ${esc(n.project)} - ${esc(n.title)}${n.summary ? `<div class="why">${esc(n.summary)}</div>` : ""}</li>`).join("")}</ul>`
+                : `<p class="empty">No recent notes in the window.</p>`;
+            const personalHtml = personal.length ? `<ul>${personal.map(p =>
+                `<li><b>${esc(p.date)}</b> ${esc(p.title)}</li>`).join("")}</ul>`
+                : `<p class="empty">No personal items in range.</p>`;
+            return `
+    <details open><summary>Data Garfield can summarize</summary>
+      <div class="grid2" style="margin-top:8px">
+        <div>
+          <div class="why"><b>Carry-forward</b> ${cf.length} item(s)</div>
+          ${cfHtml}
+          <div class="why" style="margin-top:10px"><b>Calendar + email</b></div>
+          ${m.available ? `<ul>
+            <li>${(m.meetings_today || []).length} meeting(s) today</li>
+            <li>${(m.focus_blocks || []).length} focus block(s)</li>
+            <li>${m.upcoming_meetings_7d || 0} more meeting(s) in 7 days</li>
+            <li>${email.unread_inbox || 0} unread in inbox</li>
+            <li>${(email.high_importance || []).length} high-importance email(s)</li>
+            <li>${(email.from_manager || []).length} from ${esc("Barnert")}</li>
+          </ul>` : `<p class="empty">${esc(m.note || "Unavailable.")}</p>`}
+        </div>
+        <div>
+          <div class="why"><b>Jira health</b></div>
+          ${jiraHtml}
+          <div class="why" style="margin-top:10px"><b>Recent notes</b></div>
+          ${notesHtml}
+          <div class="why" style="margin-top:10px"><b>Personal</b></div>
+          ${personalHtml}
+        </div>
+      </div>
+    </details>`;
+        }
+
+        function morningDataContext() {
+            if (!MORNING_DATA) return [];
+            const d = MORNING_DATA;
+            const L = ["Good morning data available in Brief:"];
+            const cf = (d.carry_forward && d.carry_forward.items) || [];
+            if (cf.length) {
+                L.push(`- Carry-forward: ${cf.length} item(s).`);
+                cf.slice(0, 5).forEach(x => L.push(`  - ${x.heading ? x.heading + ": " : ""}${x.text}`));
+            }
+            const m = d.m365 || {};
+            const email = m.email || {};
+            if (m.available) {
+                L.push(`- Calendar/email: ${(m.meetings_today || []).length} meeting(s) today, ${(m.focus_blocks || []).length} focus block(s), ${m.upcoming_meetings_7d || 0} more in 7 days, ${email.unread_inbox || 0} unread.`);
+                (email.high_importance || []).slice(0, 3).forEach(x => L.push(`  - High importance: ${x.subject} (${x.from})`));
+                (email.from_manager || []).slice(0, 3).forEach(x => L.push(`  - From manager: ${x.subject}`));
+            } else {
+                L.push(`- Calendar/email unavailable: ${m.note || "no detail"}.`);
+            }
+            (d.jira || []).forEach(row => {
+                if (!row.available) return L.push(`- Jira ${row.key}: unavailable (${row.error || "no detail"}).`);
+                L.push(`- Jira ${row.key}: ${row.blockers_count} blocker(s), ${row.overdue_count} overdue, sample ${row.open_sample}.`);
+                (row.blockers || []).slice(0, 3).forEach(x => L.push(`  - Blocker: ${x.key} ${x.summary || ""}`.trim()));
+                (row.overdue || []).slice(0, 3).forEach(x => L.push(`  - Overdue: ${x.key} ${x.summary || ""}`.trim()));
+            });
+            if ((d.recent_notes || []).length) {
+                L.push(`- Recent notes: ${(d.recent_notes || []).length} item(s).`);
+                d.recent_notes.slice(0, 4).forEach(n => L.push(`  - ${n.date} ${n.project}: ${n.title}${n.summary ? " - " + n.summary : ""}`));
+            }
+            if ((d.personal || []).length) {
+                L.push(`- Personal: ${(d.personal || []).length} dated item(s).`);
+                d.personal.slice(0, 4).forEach(p => L.push(`  - ${p.date} ${p.title}`));
+            }
+            return L;
+        }
+
+        async function draftMorningSummary() {
+            const stat = document.getElementById("morningsummarystat");
+            const box = document.getElementById("morningsummary");
+            const out = document.getElementById("morningout");
+            if (!MORNING_DATA) {
+                MORNING_SUMMARY_STAT = "Run Good morning first.";
+                if (stat) stat.textContent = MORNING_SUMMARY_STAT;
+                if (box) box.innerHTML = morningSummaryHtml();
+                return;
+            }
+            MORNING_SUMMARY_STAT = "Garfield is drafting the summary...";
+            MORNING_SUMMARY = "";
+            MORNING_SUMMARY_META = "";
+            if (stat) stat.textContent = MORNING_SUMMARY_STAT;
+            if (box) box.innerHTML = morningSummaryHtml();
+            try {
+                const modelSel = document.getElementById("cmodel");
+                const r = await fetch("/api/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        prompt: "Using the Good morning data in the screen context, write the Focus and Top 3 section for today's morning briefing. Use markdown only. Start with one short focus paragraph, then exactly 3 bullet priorities. Ground every point in the provided data. If a source is unavailable, say so plainly. Do not mention tool steps or your own process.",
+                        store: "work",
+                        context: screenContext(),
+                        project: "",
+                        model: modelSel ? modelSel.value : ""
+                    })
+                });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.error || "summary failed");
+                MORNING_SUMMARY = d.answer || "";
+                MORNING_SUMMARY_STAT = "Summary ready";
+                MORNING_SUMMARY_META = `${d.seconds}s · ${d.credits ?? "?"} credits · ${d.model}`;
+            } catch (e) {
+                MORNING_SUMMARY = "";
+                MORNING_SUMMARY_META = "";
+                MORNING_SUMMARY_STAT = `Failed: ${e.message}`;
+            }
+            if (stat) stat.textContent = MORNING_SUMMARY_STAT;
+            if (box) box.innerHTML = morningSummaryHtml();
+            if (out) out.innerHTML = renderMorningBrief();
+        }
+
+        /* ---- carry-forward, as decisions ----
+
+           The morning briefing printed nineteen carry-forward items every day.
+           That is not a reminder, it is wallpaper: the reading cost is the same
+           every morning, the list only grows, and the rational response is to
+           skip it. Nothing on it was wrong, it just had no exit.
+
+           So each item gets three, and no more: put it on a project as a task,
+           make it a project, or drop it with a reason. Every one of those
+           archives the original text first, because the problem was that the
+           list was unusable, not that the things on it did not matter. */
+        let CARRY = [], CARRY_STAT = "", CARRY_BUSY = "";
+
+        async function loadCarry() {
+            const box = document.getElementById("carrybox");
+            if (!box) return;
+            try {
+                const r = await fetch("/api/carry");
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.error || "could not read the list");
+                CARRY = d.items || [];
+                CARRY_STAT = "";
+            } catch (e) {
+                // Keep the current list on screen if refresh fails. A transient
+                // read error should show a warning, not erase the work already
+                // fetched.
+                CARRY_STAT = e.message;
+            }
+            paintCarry();
+        }
+
+        function paintCarry() {
+            const box = document.getElementById("carrybox");
+            if (box) box.innerHTML = carryHtml();
+            const count = document.getElementById("carrycount");
+            if (count) count.textContent = CARRY.length
+                ? `${CARRY.length} open` : (CARRY_STAT ? "" : "all clear");
+        }
+
+        function carryHtml() {
+            const warn = CARRY_STAT ? `<p class="empty">${esc(CARRY_STAT)}</p>` : "";
+            if (!CARRY.length)
+                return warn + `<p class="empty">Nothing carried forward. The list is empty because it was decided, not because it was ignored.</p>`;
+            const opts = (BOARD.projects || []).map(p =>
+                `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+            return warn + CARRY.map(it => {
+                const due = it.due
+                    ? `<span class="chip" style="background:${it.due_state === "overdue" ? "var(--stop)" : it.due_state === "today" ? "var(--warn)" : "var(--faint)"}">${esc(it.due_state)} ${esc(it.due)}</span>`
+                    : "";
+                const busy = CARRY_BUSY === it.id;
+                return `
+      <div class="flag" style="flex-direction:column;align-items:stretch;gap:6px">
+        <div><b>${esc(it.title)}</b> ${due}
+          ${it.heading ? `<span class="why">${esc(it.heading)}</span>` : ""}</div>
+        ${it.detail ? `<details><summary class="why">Why it was carried</summary>
+          <div class="why" style="margin-top:6px">${esc(it.detail)}</div></details>` : ""}
+        <div class="drow" style="gap:6px;flex-wrap:wrap">
+          <select class="ed" id="carryproj-${esc(it.id)}" style="max-width:230px">${opts}</select>
+          <button class="sm" ${busy ? "disabled" : ""} onclick="carryAct('${esc(it.id)}','task')"
+            title="Add it to that project as a task, and take it off this list">Add as task</button>
+          <button class="sm" ${busy ? "disabled" : ""} onclick="carryAct('${esc(it.id)}','project')"
+            title="It is bigger than a task: make it a project of its own">New project</button>
+          <button class="sm" ${busy ? "disabled" : ""} onclick="carryAct('${esc(it.id)}','drop')"
+            title="Drop it with a reason. The text is archived, not deleted">Drop</button>
+          ${busy ? `<span class="why">Working...</span>` : ""}
+        </div>
+      </div>`;
+            }).join("");
+        }
+
+        async function carryAct(id, action) {
+            const item = CARRY.find(x => x.id === id);
+            if (!item) return;
+            const body = { action, item: id, store: "work" };
+
+            if (action === "task") {
+                const sel = document.getElementById(`carryproj-${id}`);
+                if (!sel || !sel.value) return;
+                body.project = sel.value;
+            } else if (action === "project") {
+                const name = prompt("Name the project. It starts with only the problem filled in, so the charter still has to be answered.", item.title);
+                if (name === null) return;
+                if (!name.trim()) return;
+                body.fields = { name: name.trim() };
+            } else if (action === "drop") {
+                const why = prompt("Why is this dropped? It goes in the archive with the original text.");
+                if (why === null) return;
+                if (!why.trim()) return;
+                body.reason = why.trim();
+            }
+
+            CARRY_BUSY = id;
+            paintCarry();
+            try {
+                const r = await fetch("/api/carry", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.error || "refused");
+                CARRY_BUSY = "";
+                CARRY = CARRY.filter(x => x.id !== id);
+                paintCarry();
+                await load();
+                await loadCarry();
+                if (action === "project" && d.created && d.created.project)
+                    pick(d.created.project);
+            } catch (e) {
+                CARRY_BUSY = "";
+                CARRY_STAT = e.message;
+                paintCarry();
+            }
+        }
+
+        async function goodMorning() {
+            const stat = document.getElementById("morningstat");
+            const src = document.getElementById("morningsrc");
+            const sum = document.getElementById("morningsummary");
+            const sumStat = document.getElementById("morningsummarystat");
+            const out = document.getElementById("morningout");
+            MORNING_STAT = "Running, this takes a minute...";
+            if (stat) stat.textContent = MORNING_STAT;
+            MORNING_DATA = null;
+            MORNING_SUMMARY = "";
+            MORNING_SUMMARY_STAT = "";
+            MORNING_SUMMARY_META = "";
+            if (sumStat) sumStat.textContent = "";
+            if (sum) sum.innerHTML = morningSummaryHtml();
+            if (src) src.innerHTML = `<p class="empty">Gathering the source data Garfield will summarize...</p>`;
+            if (out) out.innerHTML = `<p class="empty">Reading calendar, email, Jira and notes...</p>`;
+            let d;
+            try {
+                const r = await fetch("/api/morning", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({})
+                });
+                d = await r.json();
+                if (!r.ok) throw new Error(d.error || "the briefing failed");
+            } catch (e) {
+                MORNING_STAT = "Failed";
+                MORNING_DATA = null;
+                if (stat) stat.textContent = MORNING_STAT;
+                if (src) src.innerHTML = `<p class="empty">No source data returned.</p>`;
+                if (out) out.innerHTML = `<p class="empty">${esc(e.message)}</p>`;
+                return;
+            }
+            MORNING_MD = d.markdown || "";
+            MORNING_DATA = d.data || null;
+            const file = d.briefing ? d.briefing.split("/").pop() : "";
+            MORNING_STAT = file ? `Saved ${file}` : "Done";
+            if (stat) stat.textContent = MORNING_STAT;
+            if (sum) sum.innerHTML = morningSummaryHtml();
+            if (src) src.innerHTML = morningDataHtml();
+            const el = document.getElementById("morningout");
+            if (el) el.innerHTML = renderMorningBrief();
+        }
+
         async function loadLog() {
             const el = document.getElementById("dlog");
             if (!el) return;
@@ -2379,8 +2979,10 @@
                because one Finder link per row is a lot of furniture for
                something used once a week. */
             const on = FILE && FILE.path === n.path ? " on" : "";
+            const ctx = importedFileContext(n.path);
             return `<div class="tree-item${on}" title="${esc(n.path)}">
                 <span class="lnk" onclick='openFile(${JSON.stringify(n.path)})'>${name}</span> ${size}
+                ${ctx ? ` <button class="vb" onclick='removeImportedFile(${JSON.stringify(n.path)})'>Remove</button>` : ""}
             </div>`;
         }
 
@@ -2479,10 +3081,29 @@
             if (t.error) return el.innerHTML = `<p class="empty">${esc(t.error)}</p>`;
             const roots = t.roots || [];
             if (!roots.length) return el.innerHTML = `<p class="empty">No folder declared for this project.</p>`;
-            el.innerHTML = roots.map(r => `
+            const taskMode = task && task.t && task.t.id ? `task: ${task.t.title}` : "project files";
+            el.innerHTML = `
+                <div class="ftbar">
+                  <button class="sm pri" onclick="pickImportFiles()">Add files</button>
+                  <button class="sm" onclick="pickImportFolder()">Add folder</button>
+                  <span class="dst">Drop or paste an image here. Destination: ${esc(taskMode)}</span>
+                  <select class="fmode" id="fmode" title="Import destination">
+                    <option value="project">Project files</option>
+                    <option value="task"${task && task.t && task.t.id ? " selected" : ""}>Current task</option>
+                  </select>
+                </div>
+                <div class="dropzone" id="fdrop">Drop files here or paste an image.</div>
+                ${roots.map(r => `
                 <div class="rlabel">${esc(r.label)}</div>
                 ${treeNode(Object.assign({ open: true, bare: true }, r.tree))}
-            `).join("") + (t.note ? `<p class="empty">${esc(t.note)}</p>` : "");
+            `).join("") + (t.note ? `<p class="empty">${esc(t.note)}</p>` : "")}`;
+            const mode = document.getElementById("fmode");
+            if (mode) {
+                mode.value = !IMPORT_MODE_SAVED && task && task.t && task.t.id ? "task"
+                    : (IMPORT_MODE === "task" && task && task.t && task.t.id ? "task" : "project");
+                mode.onchange = e => setImportMode(e.target.value);
+            }
+            bindImportZone();
             markTouched();
             markOpenFile();
         }
@@ -2585,6 +3206,208 @@
             /* A project file that was just edited is the board. Reload it, or
                the screen and the file disagree until the next refresh. */
             if (FILE.path.endsWith(".toml")) await load();
+        }
+
+        function projectRootPath() {
+            const p = proj(SEL);
+            return p && (p.folders || [])[0] ? p.folders[0].path : "";
+        }
+
+        function currentImportTaskId() {
+            const mode = document.getElementById("fmode")?.value || IMPORT_MODE;
+            if (mode !== "task") return "";
+            if (task && task.t && task.t.id) return task.t.id;
+            alert("Select a task first, or switch the import destination back to project files.");
+            return null;
+        }
+
+        function currentImportLabel() {
+            const tid = currentImportTaskId();
+            if (!tid) return "project files";
+            return task && task.t ? `task ${task.t.id}` : "project files";
+        }
+
+        function ensureImportPickers() {
+            if (!window._PICK_FILE) {
+                const f = document.createElement("input");
+                f.type = "file";
+                f.multiple = true;
+                f.style.display = "none";
+                f.addEventListener("change", async e => {
+                    const files = [...e.target.files || []];
+                    if (files.length) await importFiles(files, false);
+                    e.target.value = "";
+                });
+                document.body.appendChild(f);
+                window._PICK_FILE = f;
+            }
+            if (!window._PICK_FOLDER) {
+                const f = document.createElement("input");
+                f.type = "file";
+                f.multiple = true;
+                f.setAttribute("webkitdirectory", "");
+                f.style.display = "none";
+                f.addEventListener("change", async e => {
+                    const files = [...e.target.files || []];
+                    if (files.length) await importFiles(files, true);
+                    e.target.value = "";
+                });
+                document.body.appendChild(f);
+                window._PICK_FOLDER = f;
+            }
+        }
+
+        function pickImportFiles() {
+            ensureImportPickers();
+            window._PICK_FILE.click();
+        }
+
+        function pickTaskFiles(taskId) {
+            const f = document.createElement("input");
+            f.type = "file";
+            f.multiple = true;
+            f.style.display = "none";
+            f.addEventListener("change", async e => {
+                const files = [...e.target.files || []];
+                if (files.length) await importFiles(files, false, taskId);
+                f.remove();
+            });
+            document.body.appendChild(f);
+            f.click();
+        }
+
+        function importedFileContext(path) {
+            const p = String(path || "");
+            const m = p.match(/\/files\/tasks\/([^/]+)\//);
+            if (m) return { action: "task.file.remove", task: m[1] };
+            if (p.includes("/files/project/")) return { action: "project.file.remove" };
+            return null;
+        }
+
+        async function removeImportedFile(path) {
+            const ctx = importedFileContext(path);
+            if (!ctx) { alert("That file can only be removed from the imported files area."); return; }
+            if (!confirm("Remove this file? This deletes it from disk and clears any task attachment.")) return;
+            await api({ action: ctx.action, path });
+        }
+
+        async function removeTaskFile(taskId, path) {
+            if (!confirm("Remove this file from the task? This deletes it from disk.")) return;
+            await api({ action: "task.file.remove", task: taskId, path });
+        }
+
+        function pickImportFolder() {
+            ensureImportPickers();
+            window._PICK_FOLDER.click();
+        }
+
+        function b64FromBytes(bytes) {
+            let bin = "";
+            const chunk = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunk) {
+                bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+            }
+            return btoa(bin);
+        }
+
+        async function specFromFile(file, rel) {
+            const buf = new Uint8Array(await file.arrayBuffer());
+            return {
+                name: file.name || rel.split("/").pop(),
+                rel: rel || file.webkitRelativePath || file.name,
+                data_b64: b64FromBytes(buf),
+            };
+        }
+
+        function guessNameFromMime(mime) {
+            const m = (mime || "").toLowerCase();
+            if (m === "image/png") return "png";
+            if (m === "image/jpeg") return "jpg";
+            if (m === "image/gif") return "gif";
+            if (m === "image/webp") return "webp";
+            if (m === "image/svg+xml") return "svg";
+            return "bin";
+        }
+
+        function stampName(prefix, mime) {
+            const d = new Date();
+            const t = d.toISOString().replace(/[:.]/g, "-");
+            return `${prefix}-${t}.${guessNameFromMime(mime)}`;
+        }
+
+        async function importFiles(files, preserveRelative, taskIdOverride = "", forceProject = false) {
+            const root = projectRootPath();
+            if (!root) { alert("This project has no folder to hold imported files."); return; }
+            const taskId = forceProject ? "" : (taskIdOverride || currentImportTaskId());
+            if (taskId === null) return;
+            const action = taskId ? "task.file.add" : "project.file.add";
+            const payload = [];
+            for (const file of files) {
+                const rel = preserveRelative ? (file.webkitRelativePath || file.name) : file.name;
+                payload.push(await specFromFile(file, rel));
+            }
+            const r = await fetch("/api/edit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    store: "work",
+                    project: SEL,
+                    action,
+                    task: taskId || "",
+                    files: payload
+                })
+            });
+            const d = await r.json();
+            if (!r.ok) { alert(d.error || "import refused"); return; }
+            await loadTree(SEL, true);
+            await load();
+            return d.imported || [];
+        }
+
+        async function importClipboardImage(items, taskIdOverride = "", forceProject = false) {
+            const files = [];
+            for (const item of items) {
+                const file = item.getAsFile && item.getAsFile();
+                if (!file) continue;
+                const name = file.name || stampName("pasted", file.type);
+                files.push(new File([file], name, { type: file.type || "application/octet-stream" }));
+            }
+            if (files.length) return await importFiles(files, false, taskIdOverride, forceProject);
+            return [];
+        }
+
+        function bindImportZone() {
+            const z = document.getElementById("fdrop");
+            if (!z) return;
+            z.ondragover = e => { e.preventDefault(); z.classList.add("drag"); };
+            z.ondragleave = () => z.classList.remove("drag");
+            z.ondrop = async e => {
+                e.preventDefault();
+                z.classList.remove("drag");
+                const files = [...(e.dataTransfer?.files || [])];
+                if (!files.length) return;
+                await importFiles(files, !!e.dataTransfer?.items && [...e.dataTransfer.items].some(i => i.webkitGetAsEntry && i.webkitGetAsEntry() && i.webkitGetAsEntry().isDirectory));
+            };
+        }
+
+        async function handlePasteImport(e) {
+            if (!e.clipboardData) return;
+            const files = [...(e.clipboardData.files || [])];
+            const target = e.target instanceof Element ? e.target : null;
+            const active = document.activeElement instanceof Element ? document.activeElement : null;
+            const inChat = !!([target, active].find(n => n && n.closest && n.closest("#crail")));
+            if (files.length) {
+                e.preventDefault();
+                const imported = await importFiles(files, false, "", inChat);
+                if (inChat) addChatAttach(imported || []);
+                return;
+            }
+            const items = [...(e.clipboardData.items || [])].filter(i => i.kind === "file");
+            if (items.some(i => (i.type || "").startsWith("image/"))) {
+                e.preventDefault();
+                const imported = await importClipboardImage(items.filter(i => (i.type || "").startsWith("image/")), "", inChat);
+                if (inChat) addChatAttach(imported || []);
+            }
         }
 
         function drawPrev() {
@@ -2697,7 +3520,16 @@
     <div id="addbox" style="display:none;margin-bottom:14px">
       <input class="ed" id="nt-title" placeholder="What is the move? Be specific enough to start.">
       <div class="grid2" style="margin-top:7px">
-        <input class="ed" id="nt-due" type="date">
+        <div class="drow">
+          <input class="ed" id="nt-due" type="date">
+          <div class="dqs">
+            <button class="sm" onclick="setDueQuick('nt-due', 0)">Today</button>
+            <button class="sm" onclick="setDueQuick('nt-due', 1)">+1 day</button>
+            <button class="sm" onclick="setDueQuick('nt-due', 7)">+1 week</button>
+            <button class="sm" onclick="setDueQuick('nt-due', 'month')">+1 month</button>
+            <button class="sm" onclick="clearDue('nt-due')">Clear</button>
+          </div>
+        </div>
         <input class="ed" id="nt-effort" type="number" step="0.25" min="0" placeholder="Effort, hours">
         <label class="fl"><input type="checkbox" id="nt-urgent"> urgent</label>
         <label class="fl"><input type="checkbox" id="nt-important"> important</label>
@@ -2708,13 +3540,22 @@
     </div>
 
     ${p.tasks.length ? (shownTasks.length ? `<table>
-      <tr><th>#</th><th>Move</th><th>Due</th><th>Days left</th><th>Hours</th><th>Flags</th><th>Status</th><th></th></tr>
+      <tr><th>#</th><th>Move</th><th>Files</th><th>Due</th><th>Days left</th><th>Hours</th><th>Flags</th><th>Status</th><th></th></tr>
       ${shownTasks.map(t => TEDIT === t.id ? `<tr class="editing"><td class="num tnum">${TNUM[t.id] || ""}</td>
-        <td colspan="7">
+        <td colspan="8">
           <input class="ed" id="te-title" value="${esc(t.title)}"
                  placeholder="What is the move? Be specific enough to start.">
           <div class="grid2" style="margin-top:7px">
-            <input class="ed" id="te-due" type="date" value="${t.due || ""}">
+            <div class="drow">
+              <input class="ed" id="te-due" type="date" value="${t.due || ""}">
+              <div class="dqs">
+                <button class="sm" onclick="setDueQuick('te-due', 0)">Today</button>
+                <button class="sm" onclick="setDueQuick('te-due', 1)">+1 day</button>
+                <button class="sm" onclick="setDueQuick('te-due', 7)">+1 week</button>
+                <button class="sm" onclick="setDueQuick('te-due', 'month')">+1 month</button>
+                <button class="sm" onclick="clearDue('te-due')">Clear</button>
+              </div>
+            </div>
             <input class="ed" id="te-effort" type="number" step="0.25" min="0"
                    value="${t.effort_h || ""}" placeholder="Effort, hours">
             <label class="fl"><input type="checkbox" id="te-urgent"${t.urgent ? " checked" : ""}> urgent</label>
@@ -2730,19 +3571,23 @@
         <td class="num tnum">${TNUM[t.id] || ""}</td>
         <td>${esc(t.title)}${liveBlockers(t).length ? ` <span class="chip" style="background:var(--stop)">waiting on ${liveBlockers(t).map(b => "#" + TNUM[b]).join(", ")}</span>` : ""}
           ${t.note ? `<div class="why">${esc(t.note)}</div>` : ""}</td>
+        <td>${(t.files || []).length ? `<div class="why">Files: ${(t.files || []).map(f => `<span class="lnk" onclick='reveal(${JSON.stringify(f)})'>${esc(f.split("/").pop() || f)}</span> <button class="vb" onclick='removeTaskFile(${JSON.stringify(t.id)}, ${JSON.stringify(f)})'>Remove</button>`).join(" · ")}</div>` : ""}
+            <div class="vrow" style="margin-top:6px">
+              <button class="vb" onclick="pickTaskFiles('${t.id}')" title="Copy files into this task's folder">Attach files</button>
+            </div></td>
         <td class="num">${t.due || "<span class='why'>none</span>"}</td>
         <td class="num ${t.days_left !== null && t.days_left < 0 ? "missing" : ""}">${t.days_left === null ? "" : t.days_left + "d"}</td>
         <td class="num">${t.effort_h ? t.effort_h + "h" : ""}</td>
         <td>${t.urgent ? '<span class="chip" style="background:var(--stop)">urgent</span>' : ""}
             ${t.important ? '<span class="chip" style="background:var(--warn)">important</span>' : ""}</td>
         <td>${t.status === "open" || t.status === "doing"
-                            ? `<select class="ed" style="width:auto;padding:3px 6px"
+                        ? `<select class="ed" style="width:auto;padding:3px 6px"
               onchange="taskField('${t.id}','status',this.value)">
               ${["open", "doing", "done"].map(s => `<option${t.status === s ? " selected" : ""}>${s}</option>`).join("")}
             </select>`
-                            : esc(t.status)}</td>
+                        : esc(t.status)}</td>
         <td>${t.status === "open" || t.status === "doing"
-                            ? `<button class="vb" onclick="editTask('${t.id}')" title="Correct the wording, date or estimate">Edit</button>
+                        ? `<button class="vb" onclick="editTask('${t.id}')" title="Correct the wording, date or estimate">Edit</button>
                <button class="vb" onclick="focusTask('${t.id}')" title="Point the focus timer at this">Focus</button>
                <button class="vb" onclick="briefTask('${t.id}')" title="Load a draft instruction into chat">Ask</button>
                <button class="vb kill" onclick="dropTask('${t.id}')">Drop</button>` : ""}</td>
@@ -2752,7 +3597,7 @@
        Numbers are unchanged: #3 is the same move whatever this filter shows.</p>`}
     <p class="hint">Dropping asks for a reason and keeps the record. Deleting would
        remove the hours too, and make the workload look lighter than it is.</p>`
-                        : `<p class="empty">Nothing in that status. ${p.tasks.length} move(s) exist;
+                    : `<p class="empty">Nothing in that status. ${p.tasks.length} move(s) exist;
        <span class="lnk" onclick="setTaskFilter('all')">show all</span>.</p>`)
                     : `<p class="empty">No moves listed. Work with no next move is work that is not moving.</p>`}
   </div>
@@ -2890,6 +3735,7 @@
             });
             const d = await r.json();
             if (!r.ok) { alert(d.error || "refused"); return false; }
+            if (String(body.action || "").includes("file.")) await loadTree(SEL, true);
             await load(); draw();
             return true;
         }
@@ -2911,6 +3757,34 @@
                 }
             });
         }
+
+        function dueISO(days = 0) {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            if (days === "month") d.setMonth(d.getMonth() + 1);
+            else d.setDate(d.getDate() + days);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, "0");
+            const day = String(d.getDate()).padStart(2, "0");
+            return `${y}-${m}-${day}`;
+        }
+
+        function setDueQuick(id, days) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.value = dueISO(days);
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.focus();
+        }
+
+        function clearDue(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.value = "";
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.focus();
+        }
+
         async function taskField(id, k, v) { await api({ action: "task.edit", task: id, fields: { [k]: v } }); }
 
         /* ---- correcting a move ----
@@ -2979,6 +3853,28 @@
   <p class="lede">The five to push and the five to decide about. One decision each,
      then stop.</p>
 
+  <div class="card"><h2>Good morning
+    <span class="toolbar">
+      <button class="sm" onclick="goodMorning()" title="Run the start-my-day routine: calendar, email, Jira health, recent notes">Run it</button>
+      <button class="sm" onclick="draftMorningSummary()" title="Ask Garfield to draft the Focus and Top 3 from the Good morning data">Draft summary</button>
+      <span class="why" id="morningstat">${esc(MORNING_STAT)}</span>
+      <span class="why" id="morningsummarystat">${esc(MORNING_SUMMARY_STAT)}</span>
+    </span></h2>
+    <p class="why" style="margin:0 0 8px">Calendar and email, Jira health, recent meeting
+       notes, dated personal items. Read-only, and it takes a minute or so.</p>
+    <div id="morningsummary">${morningSummaryHtml()}</div>
+    <div id="morningsrc">${morningDataHtml()}</div>
+    <div id="morningout">${renderMorningBrief()}</div>
+  </div>
+
+  <div class="card"><h2>Carry-forward, decide each one
+    <span class="toolbar"><span class="why" id="carrycount"></span></span></h2>
+    <p class="why" style="margin:0 0 8px">Three exits: onto a project as a task, into a
+       project of its own, or dropped with a reason. All three keep the original text in
+       the archive beside the file.</p>
+    <div id="carrybox"><p class="empty">Loading...</p></div>
+  </div>
+
   <div class="card"><h2>Needs attention</h2>
     ${flags.length ? flags.map(([col, txt]) =>
                 `<div class="flag"><i class="b" style="background:${col}"></i><span>${txt}</span></div>`).join("")
@@ -3032,7 +3928,247 @@
         function reveal(p) { fetch("/api/open?path=" + encodeURIComponent(p)); }
 
         /* ---- focus timer: picking is part of the tool ---- */
-        let LEN = 25 * 60, left = LEN, tick = null, task = null;
+        const WORK_LEN = 25 * 60;
+        const BREAK_LEN = 5 * 60;
+        const LUNCH_LEN = 30 * 60;
+        const WORKS_PER_LUNCH = 4;
+        let LEN = WORK_LEN, left = LEN, phase = "work", sessions = 0, warned1m = false, tick = null, task = null;
+        let FOCUS_SCOPE = "task";
+        const LAST_TASK_KEY = "hiveframe.focus.lasttask";
+        let LAST_TASK_BY_PROJECT = {};
+        try { LAST_TASK_BY_PROJECT = JSON.parse(localStorage.getItem(LAST_TASK_KEY) || "{}"); } catch (e) { }
+        let FOCUS = document.getElementById("focus");
+        const FOCUS_KEY = "hiveframe.focus.timer";
+        let AUDIO = null;
+
+        function focusNode() { return FOCUS || document.getElementById("focus"); }
+        function focusDoc() {
+            const f = focusNode();
+            return f && f.ownerDocument ? f.ownerDocument : document;
+        }
+
+        function phaseLen(kind) {
+            return kind === "break" ? BREAK_LEN : kind === "lunch" ? LUNCH_LEN : WORK_LEN;
+        }
+
+        function phaseName(kind) {
+            return kind === "break" ? "Break" : kind === "lunch" ? "Lunch" : "Work";
+        }
+
+        function audioCtx() {
+            const Ctor = window.AudioContext || window.webkitAudioContext;
+            if (!Ctor) return null;
+            if (!AUDIO) AUDIO = new Ctor();
+            return AUDIO;
+        }
+
+        async function armAudio() {
+            const a = audioCtx();
+            if (!a) return;
+            try { if (a.state === "suspended") await a.resume(); } catch (e) { }
+        }
+
+        function beep(freq, dur, delay = 0, gain = 0.05, type = "sine") {
+            const a = audioCtx();
+            if (!a || a.state === "closed") return;
+            const start = a.currentTime + delay / 1000;
+            const osc = a.createOscillator();
+            const g = a.createGain();
+            osc.type = type;
+            osc.frequency.value = freq;
+            g.gain.setValueAtTime(0.0001, start);
+            g.gain.exponentialRampToValueAtTime(gain, start + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, start + dur / 1000);
+            osc.connect(g);
+            g.connect(a.destination);
+            osc.start(start);
+            osc.stop(start + dur / 1000 + 0.05);
+        }
+
+        function warnChime() {
+            beep(988, 120, 0, 0.06, "square");
+        }
+
+        function doneChime() {
+            beep(784, 120, 0, 0.05, "square");
+            beep(988, 120, 180, 0.05, "square");
+        }
+
+        function focusSnapshot() {
+            return {
+                len: LEN,
+                left,
+                running: !!tick,
+                savedAt: Date.now(),
+                phase,
+                sessions,
+                warned1m,
+                scope: FOCUS_SCOPE,
+                projectId: task && task.p ? task.p.id : "",
+                projectName: task && task.p ? task.p.name : "",
+                taskId: task && task.t ? task.t.id : "",
+                taskTitle: task && task.t ? task.t.title : "",
+            };
+        }
+
+        function saveFocusState() {
+            try { localStorage.setItem(FOCUS_KEY, JSON.stringify(focusSnapshot())); } catch (e) { }
+        }
+
+        function clearFocusState() {
+            PENDING_FOCUS = null;
+            try { localStorage.removeItem(FOCUS_KEY); } catch (e) { }
+        }
+
+        function focusLabelFromState(s) {
+            if (!s) return "Nothing selected";
+            if (s.scope === "project" && s.projectName) return `${s.projectName} · whole project`;
+            if (s.taskTitle && s.projectName) return `${s.taskTitle} · ${s.projectName}`;
+            if (s.projectName) return `${s.projectName} · whole project`;
+            return "Nothing selected";
+        }
+
+        function updateFocusUi() {
+            const doc = focusDoc();
+            const clock = doc.getElementById("clock");
+            if (clock) clock.textContent = fmt(left);
+            const phaseEl = doc.getElementById("phase");
+            if (phaseEl) phaseEl.textContent = `${phaseName(phase)} · ${tick ? "running" : (left < LEN ? "paused" : "ready")}`;
+            const sessionsEl = doc.getElementById("sessions");
+            if (sessionsEl) {
+                const next = phase === "work"
+                    ? `Next break in ${fmt(left)}`
+                    : `Back to work in ${fmt(left)}`;
+                sessionsEl.textContent = `${sessions} work session${sessions === 1 ? "" : "s"} complete · ${next}`;
+            }
+            const scopeEl = doc.getElementById("scope");
+            if (scopeEl) scopeEl.textContent = FOCUS_SCOPE === "project" ? "Project focus" : "Task focus";
+            const scopeBtn = doc.getElementById("projfocus");
+            if (scopeBtn) scopeBtn.textContent = FOCUS_SCOPE === "project" ? "Switch to task" : "Project";
+            const go = doc.getElementById("go");
+            if (go) go.textContent = tick ? "Pause" : (left < LEN ? "Resume" : "Start");
+            const lunch = doc.getElementById("lunch");
+            if (lunch) lunch.textContent = "Lunch";
+        }
+
+        function advancePhase() {
+            if (phase === "work") {
+                sessions += 1;
+                phase = sessions % WORKS_PER_LUNCH === 0 ? "lunch" : "break";
+            } else {
+                phase = "work";
+            }
+            LEN = phaseLen(phase);
+            left = LEN;
+            warned1m = false;
+            doneChime();
+            updateFocusUi();
+            saveFocusState();
+        }
+
+        function tickStep() {
+            if (left > 0) {
+                left -= 1;
+                if (!warned1m && left === 60) {
+                    warned1m = true;
+                    warnChime();
+                }
+            }
+            if (left <= 0) {
+                advancePhase();
+                return;
+            }
+            updateFocusUi();
+            saveFocusState();
+        }
+
+        function startTicker() {
+            if (tick) return;
+            tick = setInterval(tickStep, 1000);
+            updateFocusUi();
+            saveFocusState();
+        }
+
+        function stopTicker() {
+            if (tick) clearInterval(tick);
+            tick = null;
+            updateFocusUi();
+            saveFocusState();
+        }
+
+        function setManualPhase(kind) {
+            phase = kind;
+            LEN = phaseLen(kind);
+            left = LEN;
+            warned1m = false;
+            updateFocusUi();
+            saveFocusState();
+        }
+
+        function recordFocusedTask(id) {
+            const p = task && task.p ? task.p.id : SEL;
+            if (!p || !id) return;
+            LAST_TASK_BY_PROJECT[p] = id;
+            try { localStorage.setItem(LAST_TASK_KEY, JSON.stringify(LAST_TASK_BY_PROJECT)); } catch (e) { }
+        }
+
+        function applyFocusState(s, started = false) {
+            PENDING_FOCUS = s || null;
+            if (!s) return;
+            FOCUS_SCOPE = s.scope === "project" ? "project" : "task";
+            phase = s.phase || "work";
+            sessions = typeof s.sessions === "number" ? s.sessions : 0;
+            LEN = typeof s.len === "number" ? s.len : phaseLen(phase);
+            warned1m = !!s.warned1m;
+            let remaining = s.running ? (s.left ?? LEN) - Math.floor((Date.now() - (s.savedAt || Date.now())) / 1000) : (s.left ?? LEN);
+            while (remaining <= 0) {
+                if (phase === "work") {
+                    sessions += 1;
+                    phase = sessions % WORKS_PER_LUNCH === 0 ? "lunch" : "break";
+                } else {
+                    phase = "work";
+                }
+                LEN = phaseLen(phase);
+                remaining += LEN;
+                warned1m = false;
+            }
+            left = Math.max(0, remaining);
+            const p = { id: s.projectId || "", name: s.projectName || "" };
+            const t = FOCUS_SCOPE === "project"
+                ? { id: "", title: s.projectName || "" }
+                : { id: s.taskId || "", title: s.taskTitle || s.projectName || "" };
+            task = {
+                p,
+                t
+            };
+            const doc = focusDoc();
+            const ctx = doc.getElementById("ctx");
+            if (ctx) ctx.textContent = focusLabelFromState(s);
+            updateFocusUi();
+            if (started && s.running) startTicker();
+        }
+
+        function restoreFocusState() {
+            try {
+                const s = JSON.parse(localStorage.getItem(FOCUS_KEY) || "null");
+                if (s) applyFocusState(s, true);
+            } catch (e) { }
+        }
+
+        function hydrateFocusFromBoard() {
+            if (!PENDING_FOCUS || !BOARD || !BOARD.projects) return;
+            const p = BOARD.projects.find(x => x.id === PENDING_FOCUS.projectId);
+            if (!p) return;
+            SEL = p.id;
+            const t = FOCUS_SCOPE === "project" ? null : (PENDING_FOCUS.taskId ? (p.tasks || []).find(x => x.id === PENDING_FOCUS.taskId) : null);
+            task = { p, t: t || { id: "", title: p.name } };
+            if (focusDoc().getElementById("ctx")) focusDoc().getElementById("ctx").textContent =
+                FOCUS_SCOPE === "project" ? `${p.name} · whole project` : (t ? `${t.title} · ${p.name}` : `${p.name} · whole project`);
+            drawRail();
+            draw();
+            drawCandidates();
+            if (FILE) drawPrev();
+        }
 
         function drawCandidates() {
             const out = [];
@@ -3044,7 +4180,10 @@
                     && !(x.blocked_by || []).some(d => openIds.has(d)));
                 if (t) out.push({ p, t });
             });
-            document.getElementById("cands").innerHTML = out.length ? out.map((c, i) => `
+            const doc = focusDoc();
+            const box = doc.getElementById("cands");
+            if (!box) return;
+            box.innerHTML = out.length ? out.map((c, i) => `
     <div class="cand" onclick="setTask(${i})">
       <div class="t">${c.t.title}</div>
       <div class="r">${c.p.name} · ${c.p.why[0] || "ranked highest"}</div>
@@ -3053,8 +4192,13 @@
         }
         function setTask(i) {
             const c = window._CANDS[i]; task = c;
-            document.getElementById("ctx").textContent = c.t.title + " · " + c.p.name;
+            FOCUS_SCOPE = "task";
+            recordFocusedTask(c.p.id, c.t.id);
+            const doc = focusDoc();
+            doc.getElementById("ctx").textContent = c.t.title + " · " + c.p.name;
+            if (FILE) drawPrev();
             if (c.p.id !== SEL) pick(c.p.id);
+            saveFocusState();
         }
 
         /* Focus anything, not only what was offered.
@@ -3065,10 +4209,15 @@
             const p = proj(SEL);
             const t = (p.tasks || []).find(x => x.id === id);
             if (!t) return;
+            FOCUS_SCOPE = "task";
             task = { p, t };
-            document.getElementById("ctx").textContent = t.title + " · " + p.name;
-            document.getElementById("cands").innerHTML =
+            recordFocusedTask(p.id, t.id);
+            const doc = focusDoc();
+            doc.getElementById("ctx").textContent = t.title + " · " + p.name;
+            doc.getElementById("cands").innerHTML =
                 `<div class="why">Focused by hand. <span class="lnk" onclick="drawCandidates()">Show suggestions</span></div>`;
+            if (FILE) drawPrev();
+            saveFocusState();
         }
 
         /* A project rather than a task, for work that has no card yet. Captures
@@ -3077,29 +4226,55 @@
         function focusProject() {
             const p = proj(SEL);
             if (!p) return;
+            FOCUS_SCOPE = "project";
             task = { p, t: { id: "", title: p.name } };
-            document.getElementById("ctx").textContent = p.name + " · whole project";
-            document.getElementById("cands").innerHTML =
+            const doc = focusDoc();
+            doc.getElementById("ctx").textContent = p.name + " · whole project";
+            doc.getElementById("cands").innerHTML =
                 `<div class="why">Focused by hand. <span class="lnk" onclick="drawCandidates()">Show suggestions</span></div>`;
+            if (FILE) drawPrev();
+            saveFocusState();
+        }
+
+        function toggleFocusScope() {
+            const p = proj(SEL);
+            if (!p) return;
+            if (FOCUS_SCOPE === "project") {
+                const saved = LAST_TASK_BY_PROJECT[p.id];
+                const next = saved || (p.tasks || []).find(x => x.status === "open" || x.status === "doing");
+                if (next) {
+                    focusTask(next.id);
+                    return;
+                }
+                return;
+            }
+            focusProject();
         }
 
         function fmt(s) { return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); }
-        function paint() { document.getElementById("clock").textContent = fmt(left); }
-        document.getElementById("go").onclick = () => {
-            const b = document.getElementById("go");
-            if (tick) { clearInterval(tick); tick = null; b.textContent = "Resume"; return; }
-            b.textContent = "Pause";
-            tick = setInterval(() => {
-                left--; paint();
-                if (left <= 0) {
-                    clearInterval(tick); tick = null; left = LEN; paint();
-                    b.textContent = "Start"; document.getElementById("ctx").textContent = "Block done.";
-                }
-            }, 1000);
+        function paint() { updateFocusUi(); }
+        document.getElementById("go").onclick = async () => {
+            const doc = focusDoc();
+            const b = doc.getElementById("go");
+            if (!b) return;
+            if (tick) { stopTicker(); return; }
+            await armAudio();
+            startTicker();
+        };
+        document.getElementById("lunch").onclick = async () => {
+            await armAudio();
+            setManualPhase("lunch");
+            if (!tick) startTicker();
+        };
+        document.getElementById("projfocus").onclick = () => {
+            toggleFocusScope();
         };
         document.getElementById("reset").onclick = () => {
-            if (tick) clearInterval(tick); tick = null; left = LEN; paint();
-            document.getElementById("go").textContent = "Start";
+            const doc = focusDoc();
+            if (tick) clearInterval(tick); tick = null; phase = "work"; sessions = 0; LEN = WORK_LEN; left = LEN; warned1m = false; updateFocusUi();
+            const b = doc.getElementById("go");
+            if (b) b.textContent = "Start";
+            clearFocusState();
         };
         document.getElementById("fold").onclick = () => {
             const f = document.getElementById("focus");
@@ -3107,7 +4282,7 @@
             document.getElementById("fold").textContent = f.classList.contains("collapsed") ? "+" : "-";
         };
 
-        /* ---- moving the focus panel ----
+/* ---- moving the focus panel ----
            It floats over the page, so wherever it is parked it is in front of
            something. Three answers, in order of how far you want it to go:
            drag it, pop it into its own always-on-top window, or put it back.
@@ -3119,7 +4294,8 @@
         const SPOT_KEY = "hiveframe.focusspot";
 
         function placeFocus(x, y) {
-            const f = document.getElementById("focus");
+            const f = focusNode();
+            if (!f) return { x: 0, y: 0 };
             const w = f.offsetWidth || 274, h = f.offsetHeight || 200;
             x = Math.min(Math.max(0, x), Math.max(0, innerWidth - w));
             y = Math.min(Math.max(0, y), Math.max(0, innerHeight - h));
@@ -3137,7 +4313,8 @@
         }
 
         function homeFocus() {
-            const f = document.getElementById("focus");
+            const f = focusNode();
+            if (!f) return;
             f.style.left = "16px"; f.style.top = "auto"; f.style.bottom = "16px";
             try { localStorage.removeItem(SPOT_KEY); } catch (e) { }
         }
@@ -3146,7 +4323,8 @@
         document.getElementById("fdrag").addEventListener("pointerdown", ev => {
             /* Not from a button. The header carries three of them. */
             if (ev.target.closest("button")) return;
-            const f = document.getElementById("focus");
+            const f = focusNode();
+            if (!f) return;
             const g = ev.currentTarget;
             const r = f.getBoundingClientRect();
             const dx = ev.clientX - r.left, dy = ev.clientY - r.top;
@@ -3176,7 +4354,8 @@
            removed rather than left to fail on click. */
         async function popFocus() {
             if (!window.documentPictureInPicture) return;
-            const f = document.getElementById("focus");
+            const f = focusNode();
+            if (!f) return;
             const w = await documentPictureInPicture.requestWindow({ width: 300, height: 420 });
             [...document.styleSheets].forEach(ss => {
                 try {
@@ -3188,8 +4367,10 @@
             });
             w.document.body.classList.add("pip");
             w.document.body.appendChild(f);
+            FOCUS = f;
             w.addEventListener("pagehide", () => {
                 document.body.appendChild(f);
+                FOCUS = f;
                 homeFocus();
                 loadSpot();
             });
@@ -3201,6 +4382,7 @@
         loadSpot();
         /* A window resized smaller can leave the panel outside it. */
         addEventListener("resize", loadSpot);
+        document.addEventListener("paste", handlePasteImport);
         document.getElementById("capture").addEventListener("keydown", async e => {
             if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -3289,14 +4471,27 @@
         document.getElementById("cprompt").addEventListener("keydown", e => {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
         });
+        /* Clearing is the cheapest lever there is.
+
+           Resume re-sends the whole conversation, so every turn pays again for
+           every turn before it. Dropping the thread here makes the next question
+           a first question. TURNS is emptied too: the credit tally is a running
+           cost for this thread, and a counter that survives the thread it was
+           counting reports the wrong number. */
         document.getElementById("cnew").onclick = async () => {
-            await fetch("/api/chat", {
+            if (RUN) return;
+            const r = await fetch("/api/chat/clear", {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ reset: true, store: "work", project: SEL || "" })
-            });
+                body: JSON.stringify({ store: "work", project: SEL || "" })
+            }).then(x => x.json()).catch(() => ({}));
             if (CHAT) CHAT.session = "";
+            TURNS = [];
+            clearChatAttach();
+            const kept = r && r.archived
+                ? ` The transcript is kept as <code>${r.archived}</code>.`
+                : "";
             document.getElementById("cscroll").innerHTML =
-                `<p class="empty">Fresh thread. The previous one is still resumable from the terminal.</p>`;
+                `<p class="empty">Cleared. The next question is sent on its own.${kept}</p>`;
             paintCtx();
         };
         document.getElementById("chattoggle").onclick = () => {
@@ -3379,6 +4574,8 @@
         });
 
         loadLayout();
+        restoreFocusState();
+        addEventListener("beforeunload", () => { if (tick || PENDING_FOCUS) saveFocusState(); });
         paint(); load(); loadChat();
     </script>
 </body>

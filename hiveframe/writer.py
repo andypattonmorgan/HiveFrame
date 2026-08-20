@@ -128,6 +128,8 @@ def dumps(project) -> str:
         L.append(_kv("status", t.status, 9))
         if t.blocked_by:
             L.append(_kv("blocked_by", t.blocked_by, 9))
+        if t.files:
+            L.append(_kv("files", t.files, 9))
         if t.note:
             L.append(_kv("note", t.note, 9))
 

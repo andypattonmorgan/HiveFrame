@@ -21,10 +21,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import os
 import subprocess
 import sys
+import tempfile
 from dataclasses import replace
 from datetime import date
 from functools import partial
@@ -36,13 +39,23 @@ from .model import (Board, StoreError, capacity, hierarchy, rollup, score,
                     tool_usage)
 from .verdict import VerdictError, capture, read_log, record_verdict
 from . import edit as edits
+from . import carry as carrymod
 from . import chat as chatmod
+from .carry import CarryError
 from .chat import ChatError
 from .edit import EditError
 from .writer import save, save_tools
 
 WEB = Path(__file__).resolve().parent / "web"
 SESSION_STATE_ROOT = Path.home() / ".copilot" / "session-state"
+# The morning routine is an existing KaiserKM tool, outside this repo. Override
+# with HIVEFRAME_MORNING_SCRIPT rather than editing this line.
+MORNING_SCRIPT = Path(os.environ.get(
+    "HIVEFRAME_MORNING_SCRIPT",
+    Path.home() / "Library" / "CloudStorage"
+    / "OneDrive-KaiserPermanente" / "KaiserKM" / "tools" / "start-my-day"
+    / "start_my_day.py")).expanduser()
+MORNING_TIMEOUT_S = 300
 TREE_MAX_DEPTH = 5
 # A project folder is often a repo, and a repo's real contents are a rounding
 # error next to its machinery. Listing .git turns a file tree into noise.
@@ -175,6 +188,7 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
                 "days_left": t.days_left(),
                 "effort_h": t.effort_h, "urgent": t.urgent,
                 "important": t.important, "blocked_by": t.blocked_by,
+                "files": t.files,
                 "note": t.note,
             } for t in p.tasks],
             "relations": [{
@@ -422,6 +436,225 @@ class Handler(BaseHTTPRequestHandler):
             return path, root
         raise StoreError("path is outside every project folder on this board")
 
+    def _project_root(self, project) -> Path:
+        if not project.folders:
+            raise StoreError("this project has no folder to hold imported files")
+        return Path(project.folders[0][1]).expanduser().resolve()
+
+    def _unique_path(self, path: Path) -> Path:
+        if not path.exists():
+            return path
+        base = path.parent
+        stem = path.stem
+        suffix = "".join(path.suffixes) or path.suffix
+        n = 2
+        while True:
+            candidate = base / f"{stem}-{n}{suffix}"
+            if not candidate.exists():
+                return candidate
+            n += 1
+
+    def _import_target(self, root: Path, rel: str, task_id: str = "") -> Path:
+        rel = str(rel or "").strip().replace("\\", "/")
+        if not rel:
+            raise StoreError("no filename given")
+        rel_path = Path(rel)
+        if rel_path.is_absolute() or any(part == ".." for part in rel_path.parts):
+            raise StoreError("import path must stay inside the project")
+        base = (root / "files" / "tasks" / task_id) if task_id else (root / "files" / "project")
+        target = (base / rel_path).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError as e:
+            raise StoreError("import path escaped the project folder") from e
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return self._unique_path(target)
+
+    def _copy_imports(self, project, files, task_id: str = ""):
+        root_dir = self._project_root(project)
+        imported = []
+        for item in files:
+            rel = str(item.get("rel") or item.get("name") or "").strip()
+            target = self._import_target(root_dir, rel, task_id)
+            if item.get("data_b64"):
+                try:
+                    blob = base64.b64decode(item["data_b64"], validate=True)
+                except (ValueError, binascii.Error) as e:
+                    raise StoreError(str(e)) from e
+                target.write_bytes(blob)
+            elif item.get("text") is not None:
+                target.write_text(str(item.get("text")), encoding="utf-8")
+            else:
+                raise StoreError("file had no content")
+            if task_id:
+                edits.add_task_file(project, task_id, {"path": str(target)})
+            imported.append(str(target))
+        if task_id:
+            save(project)
+        return imported
+
+    def _remove_imported_file(self, board, project, target: str, task_id: str = ""):
+        path, _root = self._resolve_in_roots(board, target)
+        if path.exists() and path.is_dir():
+            raise StoreError("that path is a folder, not a file")
+        if path.exists():
+            path.unlink()
+        if task_id:
+            edits.remove_task_file(project, task_id, {"path": str(path)})
+        else:
+            for t in project.tasks:
+                try:
+                    edits.remove_task_file(project, t.id, {"path": str(path)})
+                except EditError:
+                    pass
+        save(project)
+        return str(path)
+
+    def _carry(self, board, store, data: dict):
+        """Give a carry-forward item one of three exits.
+
+        A standing list that only grows is read once and skipped after that, so
+        every item here leaves by becoming a task on a project, becoming a
+        project of its own, or being dropped with a reason. All three archive
+        the original text; none of them lose it.
+
+        The store edit happens before the item is removed. If adding the task
+        fails, the item is still on the list, which is the recoverable order.
+        """
+        action = str(data.get("action", "")).strip()
+        item = data.get("item", "")
+        if isinstance(item, dict):
+            item_id = str(item.get("id", "")).strip()
+        else:
+            item_id = str(item).strip()
+        if not item_id:
+            return self._json({"error": "no carry-forward item given"}, 400)
+
+        try:
+            item = carrymod.get(item_id)
+        except CarryError as e:
+            return self._json({"error": str(e)}, 400)
+
+        try:
+            projects = board.load((store,))
+        except StoreError as e:
+            return self._json({"error": str(e)}, 400)
+
+        created = {}
+        try:
+            if action == "task":
+                target = next((x for x in projects
+                               if x.id == data.get("project")), None)
+                if target is None:
+                    return self._json({"error": "no such project in that store"}, 404)
+                fields = dict(data.get("fields") or {})
+                fields.setdefault("title", item["title"])
+                # The detail is the reasoning that made it worth carrying. It
+                # belongs on the task, or the task is a title with no why.
+                fields.setdefault("note", item["detail"] or item["text"])
+                if item["due"]:
+                    fields.setdefault("due", item["due"])
+                task = edits.add_task(target, fields)
+                save(target)
+                created = {"project": target.id, "task": task.id,
+                           "title": task.title}
+                note = f"{target.id}:{task.id}"
+            elif action == "project":
+                fields = dict(data.get("fields") or {})
+                fields.setdefault("name", item["title"])
+                fields.setdefault("problem", item["text"])
+                fields.setdefault("store", store)
+                project = edits.new_project(projects, fields)
+                root = board.root_for(store)
+                project.source_file = root / f"{project.id}.toml"
+                save(project)
+                created = {"project": project.id, "name": project.name,
+                           "file": str(project.source_file)}
+                note = project.id
+            elif action == "drop":
+                note = str(data.get("reason", "")).strip()
+                if not note:
+                    return self._json(
+                        {"error": "dropping needs a reason, it goes in the archive"}, 400)
+            else:
+                return self._json({"error": f"unknown action {action!r}"}, 400)
+        except (EditError, StoreError) as e:
+            return self._json({"error": str(e)}, 400)
+
+        try:
+            resolved = carrymod.resolve(item_id, action, note)
+        except CarryError as e:
+            # The store edit already happened and is not rolled back: a real
+            # task that exists is better than a silent revert. Say so plainly.
+            return self._json({
+                "error": f"{e}. The store change was made: {created or 'none'}.",
+            }, 400)
+
+        return self._json({"ok": True, "action": action,
+                           "created": created, "resolved": resolved})
+
+    def _morning(self, data: dict):
+        """Run the existing start-my-day briefing and report where it landed.
+
+        The script lives in the KaiserKM tool suite, not in this repo, so the
+        location is resolved from the environment with that as the default. A
+        hardcoded repo-relative path was wrong and silently 404'd.
+        """
+        script = MORNING_SCRIPT
+        if not script.exists():
+            return self._json(
+                {"error": f"morning briefing script not found at {script}"}, 404)
+        cmd = [sys.executable, str(script)]
+        projects = str(data.get("projects") or "").strip()
+        if projects:
+            cmd += ["--projects", projects]
+        src_file = None
+        try:
+            src_file = tempfile.NamedTemporaryFile(
+                mode="w+", suffix=".json", prefix="hiveframe-morning-", delete=False
+            )
+            src_file.close()
+            cmd += ["--json-out", src_file.name]
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=MORNING_TIMEOUT_S, cwd=str(script.parent))
+        except subprocess.TimeoutExpired:
+            return self._json(
+                {"error": f"briefing did not finish within {MORNING_TIMEOUT_S}s"}, 400)
+        except OSError as e:
+            return self._json({"error": f"could not run the briefing: {e}"}, 400)
+
+        stdout, stderr = proc.stdout or "", proc.stderr or ""
+        source_data = None
+        if src_file is not None:
+            try:
+                src_path = Path(src_file.name)
+                if src_path.exists():
+                    source_data = json.loads(src_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                source_data = None
+            finally:
+                try:
+                    src_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        # The script announces its own output path on stderr. Trust that over a
+        # guess, because --out can send it somewhere else entirely.
+        briefing = ""
+        for line in stderr.splitlines():
+            if "Briefing written:" in line:
+                briefing = line.split("Briefing written:", 1)[1].strip()
+        if proc.returncode != 0:
+            return self._json({
+                "error": stderr.strip()[-400:] or "the briefing failed",
+                "briefing": briefing,
+            }, 400)
+        return self._json({
+            "ok": True,
+            "briefing": briefing,
+            "markdown": stdout,
+            "data": source_data,
+        })
+
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
@@ -452,6 +685,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "path not found"}, 404)
             subprocess.run(["/usr/bin/open", "-R", str(p)], check=False)
             return self._json({"ok": True})
+
+        if u.path == "/api/carry":
+            try:
+                items = carrymod.parse()
+            except CarryError as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"items": items, "path": str(carrymod.CARRY_PATH)})
 
         if u.path == "/api/log":
             name = q.get("name", ["decisions.jsonl"])[0]
@@ -648,6 +888,9 @@ class Handler(BaseHTTPRequestHandler):
                                "rel": str(path.relative_to(root_dir)),
                                "bytes": len(text.encode("utf-8"))})
 
+        if u.path == "/api/carry":
+            return self._carry(board, store, data)
+
         if u.path == "/api/edit":
             return self._edit(board, store, data)
 
@@ -663,6 +906,15 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/chat/stop":
             stopped = chatmod.stop(data.get("id", ""))
             return self._json({"ok": True, "stopped": stopped})
+
+        if u.path == "/api/chat/clear":
+            # Ends the thread. The next turn is a first turn and pays for
+            # nothing that came before it.
+            res = chatmod.clear_session(root, data.get("project", ""))
+            return self._json({"ok": True, **res})
+
+        if u.path == "/api/morning":
+            return self._morning(data)
 
         self._json({"error": "not found"}, 404)
 
@@ -743,6 +995,16 @@ class Handler(BaseHTTPRequestHandler):
                 edits.retire_tool(tools, data.get("tool", ""),
                                   data.get("reason", ""),
                                   tool_usage(tools, projects))
+            elif action in {
+                "project", "charter", "task.add", "task.edit", "task.drop",
+                "artifact.add", "file.import", "project.file.add",
+                "project.file.remove", "task.file.add", "task.file.remove",
+                "file.remove", "relation.add", "relation.verdict", "uses",
+            }:
+                # Older clients and cached pages have sent project-edit actions
+                # to the tool endpoint. Treat those as project edits so a stale
+                # browser does not turn a valid import into an unknown action.
+                return self._edit(board, store, data)
             else:
                 return self._json({"error": f"unknown action {action!r}"}, 400)
         except EditError as e:
@@ -781,6 +1043,39 @@ class Handler(BaseHTTPRequestHandler):
                 edits.drop_task(p, data.get("task", ""), data.get("reason", ""))
             elif action == "artifact.add":
                 edits.add_artifact(p, payload)
+            elif action in ("project.file.add", "file.import"):
+                files = data.get("files") or payload.get("files") or []
+                if not files:
+                    return self._json({"error": "no files given"}, 400)
+                try:
+                    imported = self._copy_imports(p, files)
+                except StoreError as e:
+                    return self._json({"error": str(e)}, 400)
+                return self._json({"ok": True, "project": p.id, "action": action, "imported": imported})
+            elif action in ("project.file.remove", "file.remove"):
+                try:
+                    removed = self._remove_imported_file(board, p, data.get("path", ""))
+                except StoreError as e:
+                    return self._json({"error": str(e)}, 400)
+                return self._json({"ok": True, "project": p.id, "action": action, "removed": removed})
+            elif action == "task.file.add":
+                files = data.get("files") or payload.get("files") or []
+                if files:
+                    task_id = data.get("task", "")
+                    if not task_id:
+                        return self._json({"error": "no task given"}, 400)
+                    try:
+                        imported = self._copy_imports(p, files, task_id)
+                    except StoreError as e:
+                        return self._json({"error": str(e)}, 400)
+                    return self._json({"ok": True, "project": p.id, "action": action, "imported": imported})
+                edits.add_task_file(p, data.get("task", ""), payload)
+            elif action == "task.file.remove":
+                try:
+                    removed = self._remove_imported_file(board, p, data.get("path", ""), data.get("task", ""))
+                except StoreError as e:
+                    return self._json({"error": str(e)}, 400)
+                return self._json({"ok": True, "project": p.id, "action": action, "removed": removed})
             elif action == "relation.add":
                 edits.add_relation(p, data.get("to", ""), data.get("type", ""),
                                    data.get("note", ""))

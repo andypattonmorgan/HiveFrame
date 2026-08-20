@@ -213,18 +213,26 @@ def read_transcript(root: Path, project: str = "", limit: int = 60) -> list[dict
     return rows[-limit:]
 
 
-def clear_session(root: Path, project: str = "") -> None:
+def clear_session(root: Path, project: str = "") -> dict:
     """Start a fresh conversation. The old CLI session is not deleted, only
     forgotten here, so it stays resumable from the terminal. The transcript is
     archived rather than removed, for the same reason: a decision trail that a
-    button can erase is not a trail."""
+    button can erase is not a trail.
+
+    Returns what it did, so the caller can say which file the record went to
+    instead of asking the reader to take the clearing on faith."""
     p = _session_path(root, project)
-    if p.exists():
+    had = p.exists()
+    if had:
         p.unlink()
     t = _transcript_path(root, project)
+    archived = ""
     if t.exists():
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        t.rename(t.with_suffix(f".{stamp}.jsonl"))
+        dest = t.with_suffix(f".{stamp}.jsonl")
+        t.rename(dest)
+        archived = dest.name
+    return {"cleared": had, "archived": archived}
 
 
 def _split_steps(text: str) -> tuple[str, list[dict]]:

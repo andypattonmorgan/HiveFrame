@@ -125,6 +125,7 @@ class Task:
     urgent: bool = False
     important: bool = False
     blocked_by: list[str] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)
     note: str = ""
 
     @property
@@ -345,6 +346,10 @@ def load_project(path: Path) -> Project:
     for t in raw.get("task", []):
         t = dict(t)
         t["due"] = _as_date(t.get("due"))
+        files = t.get("files") or []
+        if isinstance(files, str):
+            files = [files]
+        t["files"] = [str(p) for p in files if str(p).strip()]
         tasks.append(Task(**{k: v for k, v in t.items()
                              if k in Task.__dataclass_fields__}))
 

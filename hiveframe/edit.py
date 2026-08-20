@@ -20,10 +20,15 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from pathlib import Path
 
-from .model import Relation, Task
+from .model import (KINDS, TIER_PARENT, TIERS, Charter, Project, Relation,
+                    Task)
 
 TASK_STATUS = ("open", "doing", "done", "dropped")
+# Mirrors the verdict vocabulary: a project created here can only start in a
+# state the review screen already knows how to change.
+PROJECT_STATUS = ("active", "blocked", "paused", "done", "killed")
 RELATION_VERDICTS = ("confirmed", "rejected", "suggested")
 
 
@@ -59,6 +64,22 @@ def _find_task(project, task_id: str) -> Task:
     raise EditError(f"no task {task_id!r} in {project.id}")
 
 
+def _canon_path(path: str) -> str:
+    p = Path(path).expanduser()
+    try:
+        return str(p.resolve())
+    except OSError:
+        return str(p)
+
+
+def _as_paths(value) -> list[str]:
+    if value in (None, "", []):
+        return []
+    if isinstance(value, str):
+        return [value]
+    return [str(v) for v in value if str(v).strip()]
+
+
 def _would_cycle(project, task_id: str, deps: list[str]) -> bool:
     """Depth-first walk from each proposed dependency back to the task."""
     by_id = {t.id: t for t in project.tasks}
@@ -73,6 +94,54 @@ def _would_cycle(project, task_id: str, deps: list[str]) -> bool:
         return any(reaches(d) for d in by_id[start].blocked_by)
 
     return any(reaches(d) for d in deps)
+
+
+def new_project(existing, fields: dict):
+    """A project created from something that was only ever a note.
+
+    Kept deliberately thin. A project made in one click from a carry-forward
+    item is a placeholder for a decision, not a finished charter, so this fills
+    in what is known (the problem it came from) and leaves the rest missing on
+    purpose. The board already flags an incomplete charter, and an invented
+    hypothesis would silence that flag without answering it.
+    """
+    name = str(fields.get("name", "")).strip()
+    if not name:
+        raise EditError("a project needs a name")
+
+    tier = str(fields.get("tier") or "project").strip()
+    if tier not in TIERS:
+        raise EditError(f"unknown tier {tier!r}")
+    kind = str(fields.get("kind") or "initiative").strip()
+    if kind not in KINDS:
+        raise EditError(f"unknown kind {kind!r}")
+
+    taken = {p.id for p in existing}
+    parent = str(fields.get("parent", "")).strip()
+    if parent:
+        if parent not in taken:
+            raise EditError(f"no such parent project {parent!r}")
+        allowed = TIER_PARENT.get(tier, ())
+        if not allowed:
+            raise EditError(f"a {tier} does not sit under anything")
+        parent_tier = next(p.tier for p in existing if p.id == parent)
+        if parent_tier not in allowed:
+            raise EditError(f"a {tier} cannot sit under a {parent_tier}")
+
+    project = Project(
+        id=_slug(name, taken),
+        name=name,
+        tier=tier,
+        parent=parent,
+        kind=kind,
+        horizon=str(fields.get("horizon", "")).strip(),
+        status=str(fields.get("status") or "active").strip(),
+        store=str(fields.get("store") or "work").strip(),
+        charter=Charter(problem=str(fields.get("problem", "")).strip()),
+    )
+    if project.status not in PROJECT_STATUS:
+        raise EditError(f"unknown status {project.status!r}")
+    return project
 
 
 def edit_charter(project, fields: dict):
@@ -112,6 +181,7 @@ def add_task(project, data: dict) -> Task:
         urgent=bool(data.get("urgent")),
         important=bool(data.get("important")),
         blocked_by=[d for d in (data.get("blocked_by") or []) if d in taken],
+        files=[_canon_path(p) for p in _as_paths(data.get("files"))],
         note=str(data.get("note", "")).strip(),
     )
     if task.status not in TASK_STATUS:
@@ -150,6 +220,8 @@ def edit_task(project, task_id: str, fields: dict) -> Task:
                     "that dependency closes a loop, which would make every task "
                     "in it permanently unstartable")
             t.blocked_by = deps
+        elif k == "files":
+            t.files = [_canon_path(p) for p in _as_paths(v)]
         else:
             raise EditError(f"a task has no field {k!r}")
     return t
@@ -201,11 +273,49 @@ def add_artifact(project, data: dict):
     label = str(data.get("label", "")).strip()
     if not label:
         raise EditError("an artifact needs a label")
-    art = Artifact(label=label, path=str(data.get("path", "")).strip(),
+    path = str(data.get("path", "")).strip()
+    kind = str(data.get("kind", "doc")).strip() or "doc"
+    if path:
+        p = Path(path).expanduser()
+        if p.exists():
+            kind = "folder" if p.is_dir() else "file" if p.is_file() else kind
+        path = _canon_path(path)
+    art_path = path
+    if art_path and any((a.path and _canon_path(a.path) == art_path) for a in project.artifacts):
+        raise EditError(f"that path is already listed on {project.id}")
+    art = Artifact(label=label, path=art_path,
                    url=str(data.get("url", "")).strip(),
-                   kind=str(data.get("kind", "doc")).strip() or "doc")
+                   kind=kind)
     project.artifacts.append(art)
     return art
+
+
+def add_task_file(project, task_id: str, data: dict):
+    t = _find_task(project, task_id)
+    path = _canon_path(str(data.get("path", "")).strip())
+    if not path.strip():
+        raise EditError("a task file needs a path")
+    p = Path(path)
+    if not p.exists():
+        raise EditError(f"file not found: {path}")
+    if not p.is_file():
+        raise EditError("task files must be files, not folders")
+    if any(_canon_path(x) == path for x in t.files):
+        raise EditError("that file is already attached to the task")
+    t.files.append(path)
+    return t
+
+
+def remove_task_file(project, task_id: str, data: dict):
+    t = _find_task(project, task_id)
+    path = _canon_path(str(data.get("path", "")).strip())
+    if not path.strip():
+        raise EditError("a task file needs a path")
+    files = [x for x in t.files if _canon_path(x) != path]
+    if len(files) == len(t.files):
+        raise EditError("that file is not attached to the task")
+    t.files = files
+    return t
 
 
 # ---- tools ---------------------------------------------------------------
