@@ -1300,6 +1300,27 @@ def selftest() -> int:
     assert chatmod.DEFAULT_MODEL == chatmod.MODELS[0][0], "default must be the cheapest model"
     print("  chat can write and run local commands; the network stays closed")
 
+    # The CLI reports credits as a running session total. If this ever logs the
+    # raw reading again, every long thread reports a per-turn price it did not
+    # charge, and the cost picture is quietly wrong rather than loudly broken.
+    with tempfile.TemporaryDirectory() as td:
+        mroot = Path(td)
+        a = chatmod.meter_turn(mroot, "p", "sess-1", 10.0)
+        assert (a["credits"], a["credits_basis"], a["depth"]) == (10.0, "first", 1), a
+        b = chatmod.meter_turn(mroot, "p", "sess-1", 34.0)
+        assert (b["credits"], b["credits_basis"], b["depth"]) == (24.0, "delta", 2), b
+        assert b["credits_total"] == 34.0, b
+        # A reading below the last one is a different odometer. No negative price.
+        c = chatmod.meter_turn(mroot, "p", "sess-1", 4.0)
+        assert c["credits"] is None and c["credits_basis"] == "reset", c
+        # Clearing drops the meter, so the next thread does not diff against a
+        # total it never ran up.
+        chatmod.clear_session(mroot, "p")
+        assert chatmod.meter_read(mroot, "p") == {}, "clear must reset the meter"
+        d = chatmod.meter_turn(mroot, "p", "sess-2", 7.0)
+        assert (d["credits"], d["credits_basis"], d["depth"]) == (7.0, "first", 1), d
+    print("  credits are logged per turn, not as the session odometer")
+
     print("selftest OK")
     return 0
 

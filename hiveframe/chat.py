@@ -37,15 +37,21 @@ Sessions. The CLI owns continuity. It returns a session id on first turn and
 resumes with --resume, so HiveFrame stores the id and nothing else. Conversation
 history is not duplicated here, because two copies of a transcript disagree.
 
-Sessions are per project, not per store. Cost grows with conversation length
-because resume re-sends the history, and a question about one project rarely
-needs another project's thread. Switching projects therefore switches threads,
-which is both cheaper and the same separation the rest of the tool enforces.
+Sessions are per project, not per store. A question about one project rarely
+needs another project's thread, so switching projects switches threads, which is
+the same separation the rest of the tool enforces.
 
-Cost. Measured on an identical one-word prompt, the cheapest model costs 1.5
-credits and the heaviest 20.8. The default is the light one and the heavy one is
-picked deliberately per turn, because a heavy model left as a default is a bill
-nobody decided to run up.
+Cost. The CLI reports "AI Credits" as a running session total, so the number in
+the footer of a long thread is an odometer, not a price. What is logged is the
+difference between readings, tagged with how it was derived (credits_basis), so
+a later analysis can tell a measured turn from an inferred one.
+
+Measured over 106 logged turns, per-turn cost tracks how much work the turn did
+more than how long the thread was: duration r=+0.58, context size r=+0.25,
+answer size r=+0.23, thread depth r=+0.21. Depth is the weakest of the four.
+That sample is observational, four models mixed and most depth bands n=1, so it
+is enough to reject "depth dominates cost" and not enough to price depth. The
+per-turn instrumentation added here is what a controlled answer would use.
 """
 
 from __future__ import annotations
@@ -65,6 +71,7 @@ from pathlib import Path
 
 CHAT_LOG = "chat.jsonl"
 SESSION_FILE = ".chat_session"
+METER_FILE = ".chat_meter"
 TRANSCRIPT_FILE = "transcript"
 
 # The CLI marks a tool invocation with a glyph and indents its detail beneath.
@@ -168,10 +175,9 @@ def available() -> dict:
 def _session_path(root: Path, project: str = "") -> Path:
     """One thread per project.
 
-    Resume re-sends the whole conversation, so cost grows with history. Keeping
-    a separate thread per project means switching subject also drops the history
-    that no longer applies, which is cheaper and matches the separation the rest
-    of the tool enforces.
+    Switching subject drops the history that no longer applies, which matches
+    the separation the rest of the tool enforces. It was also assumed to be the
+    main cost lever; see the module docstring for why that is unproven.
     """
     safe = re.sub(r"[^a-z0-9_-]", "", (project or "board").lower())[:60] or "board"
     return root / f"{SESSION_FILE}.{safe}"
@@ -187,6 +193,78 @@ def read_session(root: Path, project: str = "") -> str:
 def _transcript_path(root: Path, project: str = "") -> Path:
     safe = re.sub(r"[^a-z0-9_-]", "", (project or "board").lower())[:60] or "board"
     return root / f"{TRANSCRIPT_FILE}.{safe}.jsonl"
+
+
+def _meter_path(root: Path, project: str = "") -> Path:
+    safe = re.sub(r"[^a-z0-9_-]", "", (project or "board").lower())[:60] or "board"
+    return root / f"{METER_FILE}.{safe}.json"
+
+
+def meter_read(root: Path, project: str = "") -> dict:
+    """Last odometer reading for this project's thread."""
+    p = _meter_path(root, project)
+    if not p.exists():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def meter_turn(root: Path, project: str, session: str,
+               total: float | None) -> dict:
+    """Convert the CLI's odometer into the cost of the turn just taken.
+
+    The CLI reports "AI Credits" as a running total for the session, not a price
+    per turn. Measured over 106 logged turns, 82 of 82 consecutive readings
+    inside a session were non-decreasing and none fell, which is an odometer and
+    not a meter. Recording it raw makes a long thread look expensive per turn
+    when what actually grew was the total.
+
+    So the reading is kept and the difference is what gets reported. Fields:
+
+      credits          cost of this turn alone, or None if it cannot be derived
+      credits_total    the odometer reading itself
+      credits_basis    how credits was arrived at, so a later analysis can
+                       filter on it rather than trusting every row equally:
+                         delta   total minus the previous reading, the good case
+                         first   first turn of a session, so the total is the cost
+                         reset   the odometer went backwards or the session
+                                 changed under us; the turn is real, the number
+                                 is not comparable
+                         none    the CLI printed no credits line
+
+    Depth is recorded here too, because it is the variable the cost question is
+    actually about and reconstructing it later from timestamps is guesswork.
+    """
+    m = meter_read(root, project)
+    same = bool(session) and m.get("session") == session
+    prev = m.get("total") if same else None
+    depth = (m.get("depth", 0) + 1) if same else 1
+
+    cost, basis = None, "none"
+    if total is not None:
+        if prev is None:
+            cost, basis = total, ("first" if depth == 1 else "reset")
+        elif total >= prev:
+            cost, basis = round(total - prev, 4), "delta"
+        else:
+            # A lower reading than last time means this is not the same
+            # odometer. Report the turn, refuse to report a negative price.
+            cost, basis = None, "reset"
+
+    try:
+        _meter_path(root, project).write_text(json.dumps({
+            "session": session, "total": total if total is not None else prev,
+            "depth": depth,
+            "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }), encoding="utf-8")
+    except OSError:
+        pass
+
+    return {"credits": cost, "credits_total": total,
+            "credits_basis": basis, "depth": depth}
 
 
 def read_transcript(root: Path, project: str = "", limit: int = 60) -> list[dict]:
@@ -225,6 +303,12 @@ def clear_session(root: Path, project: str = "") -> dict:
     had = p.exists()
     if had:
         p.unlink()
+    # The odometer belongs to the session that is going. Leaving it would make
+    # the next turn diff against a reading from a conversation that no longer
+    # exists, which reports the new thread's first turn as free.
+    mp = _meter_path(root, project)
+    if mp.exists():
+        mp.unlink()
     t = _transcript_path(root, project)
     archived = ""
     if t.exists():
@@ -320,6 +404,7 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
     argv = _build_argv(state, sent, dirs, model)
 
     session = read_session(root, project) if resume else ""
+    resumed = bool(session)
     if session:
         argv.append(f"--resume={session}")
 
@@ -355,6 +440,7 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
             credits = float(c.group(1))
         except ValueError:
             credits = None
+    meter = meter_turn(root, project, session, credits)
 
     answer = _strip_footer(out.stdout or "")
     answer, steps = _split_steps(answer)
@@ -364,12 +450,16 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
         "prompt": prompt,
         "project": project or "",
         "context_chars": len(context or ""),
+        "prompt_chars": len(prompt),
+        "sent_chars": len(sent),
         "answer_chars": len(answer),
+        "steps_count": len(steps),
         "session": session,
+        "resumed": bool(resumed),
         "model": model or DEFAULT_MODEL,
         "seconds": elapsed,
-        "credits": credits,
         "exit": out.returncode,
+        **meter,
     }
     with (root / CHAT_LOG).open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec) + "\n")
@@ -380,7 +470,8 @@ def ask(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
         fh.write(json.dumps({"role": "user", "at": rec["at"], "text": prompt}) + "\n")
         fh.write(json.dumps({
             "role": "assistant", "at": rec["at"], "text": answer, "steps": steps,
-            "model": rec["model"], "credits": credits, "seconds": elapsed,
+            "model": rec["model"], "credits": meter["credits"],
+            "credits_basis": meter["credits_basis"], "seconds": elapsed,
         }) + "\n")
 
     return {"answer": answer, "steps": steps, **rec}
@@ -604,6 +695,7 @@ def ask_stream(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
             credits = float(c.group(1))
         except ValueError:
             credits = None
+    meter = meter_turn(root, project, session, credits)
 
     for s in steps:
         s["detail"] = "\n".join(s["detail"]).strip()
@@ -615,13 +707,15 @@ def ask_stream(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
         "prompt": prompt,
         "project": project or "",
         "context_chars": len(context or ""),
+        "prompt_chars": len(prompt),
         "answer_chars": len(answer),
+        "steps_count": len(steps),
         "session": session,
         "model": model or DEFAULT_MODEL,
         "seconds": elapsed,
-        "credits": credits,
         "exit": proc.returncode,
         "stopped": stopped,
+        **meter,
     }
     with (root / CHAT_LOG).open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec) + "\n")
@@ -633,7 +727,8 @@ def ask_stream(prompt: str, root: Path, dirs: tuple[Path, ...] = (),
         fh.write(json.dumps({"role": "user", "at": rec["at"], "text": prompt}) + "\n")
         fh.write(json.dumps({
             "role": "assistant", "at": rec["at"], "text": answer, "steps": steps,
-            "model": rec["model"], "credits": credits, "seconds": elapsed,
+            "model": rec["model"], "credits": meter["credits"],
+            "credits_basis": meter["credits_basis"], "seconds": elapsed,
             "stopped": stopped,
         }) + "\n")
 

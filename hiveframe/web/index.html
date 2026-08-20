@@ -1553,7 +1553,7 @@
                 <b>Ask</b>
                 <span class="spacer"></span>
                 <button class="mini" id="cnew"
-                    title="Drop the thread. The next question is sent alone, with no history behind it.">Clear</button>
+                    title="Drop the thread. Use it when the subject changes, not to save credits.">Clear</button>
             </div>
             <div class="cctx" id="cctx">Checking...</div>
             <div class="chatattach" id="chatattach"></div>
@@ -2184,10 +2184,12 @@
 
         /* Switching project switches thread.
 
-           Resume re-sends the whole conversation, so cost grows with history, and a
-           question about one project rarely needs another's. Measured: the same
-           question cost 3.5 credits fresh and 20.8 deep in a session. Dropping the
-           thread on a subject change is the single biggest lever on spend.
+           A question about one project rarely needs another's history, and an
+           answer grounded in the wrong thread is worse than one grounded in
+           nothing. This was also believed to be the single biggest lever on
+           spend, on one measurement of 3.5 credits fresh against 20.8 deep.
+           That reading was the session odometer, not the turn price, so the
+           claim does not hold and the separation stands on relevance alone.
 
            The thread is not lost when you leave it. Each one is stored, so coming
            back to a project shows the conversation the CLI is about to resume,
@@ -4471,13 +4473,14 @@
         document.getElementById("cprompt").addEventListener("keydown", e => {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
         });
-        /* Clearing is the cheapest lever there is.
+        /* Clearing ends the thread when the subject has moved on.
 
-           Resume re-sends the whole conversation, so every turn pays again for
-           every turn before it. Dropping the thread here makes the next question
-           a first question. TURNS is emptied too: the credit tally is a running
-           cost for this thread, and a counter that survives the thread it was
-           counting reports the wrong number. */
+           It was built as a cost control. The turn log does not support that:
+           over 106 turns, per-turn cost tracked duration (r=+0.58) far more
+           than thread depth (r=+0.21). Kept because a thread about one thing is
+           a bad place to ask about another, which is a reason that stands on
+           its own. TURNS is emptied so the credit figure describes the thread
+           it is counting. */
         document.getElementById("cnew").onclick = async () => {
             if (RUN) return;
             const r = await fetch("/api/chat/clear", {
