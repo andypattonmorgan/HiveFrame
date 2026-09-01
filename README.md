@@ -19,6 +19,15 @@ board can lose entries.
 files and calls existing read-only connectors. It has no write path into Jira,
 ServiceNow, Concerto or the warehouse, and it adds no new access.
 
+Confluence is the one system of record it reads directly, through
+`hiveframe/confluence.py` against `confluence-aes.kp.org`. GET only, and
+structurally so: the module has a single request helper that hard-codes the GET
+method and no verb in it builds a body. The PAT is resolved from the macOS
+Keychain (`confluence-aes-pat` / `D112236`) at call time and is never logged or
+written to a file. The host needs the KP VPN. Endpoints are
+`/api/confluence/state`, `/search`, `/page` and `/spaces`; the Deliverables card
+uses them to record a page of record as an artifact with its URL.
+
 **What it writes.** Local files only, inside a store the caller named: project
 `.toml` files, an append-only `decisions.jsonl`, and an append-only
 `inbox.jsonl`. Everything else is a GET.
@@ -79,14 +88,30 @@ nothing is lost.
 python3 -m hiveframe.server --selftest
 
 # run it
-python3 -m hiveframe.server --port 8787
+./run.sh                 # work store, port 8787, detached
+PORT=9000 ./run.sh       # another port
+./run.sh --fg            # foreground, for reading tracebacks live
 # then open http://127.0.0.1:8787
 ```
+
+Use `run.sh` rather than calling the module directly. It sets three environment
+facts that have each failed silently at least once, and it reports what it
+found before it starts:
+
+| Fact | Failure when it is wrong |
+|---|---|
+| `PATH` includes `/opt/homebrew/bin` | `shutil.which("copilot")` returns nothing, chat reports "CLI not found", and the Send button is greyed out with no visible cause. `copilot` is a Node loader, so `node` must resolve from the same directory. |
+| stdin is `/dev/null` | `nohup` leaves stdin on the terminal. Interrupt that terminal later and every request hangs with an empty log, which reads as a dead server rather than a blocked one. |
+| `HIVEFRAME_WORK` exists | `Board.load()` skips a root that does not exist and returns an empty list, so a mistyped path is indistinguishable from an empty board and looks like the portfolio was lost. |
+
+The store check runs before the old server is killed, so a bad path leaves a
+working server running. On success the script prints the project count and
+whether chat is ready, both read from the server rather than assumed.
 
 Point it at real data with environment variables. Neither store is in this repo.
 
 ```
-export HIVEFRAME_WORK=~/Library/CloudStorage/OneDrive-.../hiveframe/projects
+export HIVEFRAME_WORK=~/Library/CloudStorage/OneDrive-.../hiveframe-store/projects
 export HIVEFRAME_PERSONAL=~/Library/CloudStorage/GoogleDrive-.../hiveframe/projects
 export HIVEFRAME_WEEKLY_HOURS=10
 ```
