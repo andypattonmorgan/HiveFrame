@@ -125,6 +125,11 @@ adds a view.
 - A caller names the stores it wants. A work view that never asks for the personal
   store cannot receive it.
 - An unknown store is an error, not an empty result.
+- A configured store whose directory does not exist is an error too. Absent is
+  not empty. This was once skipped silently, so a mistyped `HIVEFRAME_WORK`
+  served 200 with zero projects and looked like the portfolio had been lost.
+  Not configured at all is still a legitimate skip, so a work-only setup does
+  not have to pretend a personal store exists.
 - A project file cannot promote itself into a store the caller did not ask for.
   The directory it sits in decides.
 
