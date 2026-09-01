@@ -240,33 +240,36 @@ class Project:
         return self.charter.missing_for(self.tier)
 
     @property
-    def folders(self) -> list[tuple[str, str]]:
-        """The directories that belong to this project, as (label, path).
+    def folder_roots(self) -> list[tuple[str, str, str]]:
+        """The directories this project can browse, as (label, path, mode).
 
-        The declared ``folder`` comes first, then any artifact whose path is a
-        directory. A project is worked in places it has explicitly named, and
-        the file view should show those places rather than the whole store: a
-        tree that lists everything is the same context bleed the charter exists
-        to stop.
+        Mode is ``home`` for the one declared ``folder``, and ``linked`` for a
+        directory artifact. A linked folder is a pointer: it is browsable and
+        read-only, and nothing is ever written or copied into it. The home is
+        the only place this project writes.
+
+        A project is worked in places it has explicitly named, and the file view
+        shows those places rather than the whole store: a tree that lists
+        everything is the same context bleed the charter exists to stop.
 
         Nested paths are dropped in favour of the outermost one, so a folder is
         not drawn twice.
         """
-        out: list[tuple[str, str]] = []
+        out: list[tuple[str, str, str]] = []
         if self.folder:
-            out.append(("Project folder", self.folder))
+            out.append(("Project home", self.folder, "home"))
         for a in self.artifacts:
             if not a.path:
                 continue
             try:
                 if Path(a.path).expanduser().is_dir():
-                    out.append((a.label or "Folder", a.path))
+                    out.append((a.label or "Linked folder", a.path, "linked"))
             except OSError:
                 continue
 
-        kept: list[tuple[str, str]] = []
+        kept: list[tuple[str, str, str]] = []
         seen: list[Path] = []
-        for label, raw in out:
+        for label, raw, mode in out:
             p = Path(raw).expanduser()
             try:
                 resolved = p.resolve()
@@ -275,8 +278,21 @@ class Project:
             if any(resolved == s or s in resolved.parents for s in seen):
                 continue
             seen.append(resolved)
-            kept.append((label, str(p)))
+            kept.append((label, str(p), mode))
         return kept
+
+    @property
+    def folders(self) -> list[tuple[str, str]]:
+        """The browsable directories as (label, path). See ``folder_roots``."""
+        return [(label, path) for label, path, _ in self.folder_roots]
+
+    @property
+    def home_folder(self) -> str | None:
+        """The single directory this project writes into, if one is declared."""
+        for _, path, mode in self.folder_roots:
+            if mode == "home":
+                return path
+        return None
 
     @property
     def open_tasks(self) -> list[Task]:
@@ -420,6 +436,11 @@ class Board:
     Callers name the stores they want. A work view that never asks for the
     personal store cannot accidentally receive it, and asking for an unknown
     store is an error rather than an empty result.
+
+    A configured store whose directory does not exist is also an error. It was
+    once skipped silently, which meant a mistyped path and an empty board were
+    indistinguishable: the server answered 200 with zero projects and the
+    portfolio appeared to have been lost. Absent is not empty.
     """
 
     def __init__(self, roots: dict[str, Path]):
@@ -427,6 +448,40 @@ class Board:
         for name in self.roots:
             if name not in STORES:
                 raise StoreError(f"unknown store: {name}")
+
+    def check(self) -> list[str]:
+        """Configured roots that are not usable directories, as readable lines.
+
+        Returned rather than raised so a caller can report every problem at
+        once, at startup, instead of discovering them one request at a time.
+        """
+        bad = []
+        for name, root in sorted(self.roots.items()):
+            if not root.exists():
+                bad.append(f"store {name}: directory does not exist: {root}")
+            elif not root.is_dir():
+                bad.append(f"store {name}: not a directory: {root}")
+        return bad
+
+    def _root_checked(self, store: str) -> Path:
+        """The root for a store, or a StoreError naming exactly what is wrong.
+
+        One gate for readers and writers both, so they cannot disagree about
+        whether a store is usable.
+        """
+        if store not in STORES:
+            raise StoreError(f"unknown store: {store}")
+        root = self.roots.get(store)
+        if root is None:
+            raise StoreError(f"store {store} is not configured")
+        if not root.exists():
+            raise StoreError(
+                f"store {store} is configured but its directory does not exist: "
+                f"{root}. Set HIVEFRAME_{store.upper()} to the right path."
+            )
+        if not root.is_dir():
+            raise StoreError(f"store {store} is not a directory: {root}")
+        return root
 
     @classmethod
     def from_env(cls) -> "Board":
@@ -443,22 +498,19 @@ class Board:
 
     def root_for(self, store: str) -> Path:
         """The directory backing a store. Same gate as load(), for writers."""
-        if store not in STORES:
-            raise StoreError(f"unknown store: {store}")
-        root = self.roots.get(store)
-        if root is None:
-            raise StoreError(f"store {store} is not configured")
-        return root
+        return self._root_checked(store)
 
     def load(self, stores: tuple[str, ...] = ("work",)) -> list[Project]:
-        for s in stores:
-            if s not in STORES:
-                raise StoreError(f"unknown store: {s}")
         out: list[Project] = []
         for name in stores:
-            root = self.roots.get(name)
-            if not root or not root.exists():
+            if name not in STORES:
+                raise StoreError(f"unknown store: {name}")
+            # Not configured is a legitimate skip: a work-only setup should not
+            # have to pretend a personal store exists. Configured but missing is
+            # not, and _root_checked says which of the two it is.
+            if name not in self.roots:
                 continue
+            root = self._root_checked(name)
             for f in sorted(root.glob("*.toml")):
                 if f.name == TOOLS_FILE:
                     continue          # the registry is not a project
@@ -470,14 +522,13 @@ class Board:
         return out
 
     def tools(self, stores: tuple[str, ...] = ("work",)) -> list[Tool]:
-        for s in stores:
-            if s not in STORES:
-                raise StoreError(f"unknown store: {s}")
         out: list[Tool] = []
         for name in stores:
-            root = self.roots.get(name)
-            if root and root.exists():
-                out.extend(load_tools(root))
+            if name not in STORES:
+                raise StoreError(f"unknown store: {name}")
+            if name not in self.roots:
+                continue
+            out.extend(load_tools(self._root_checked(name)))
         return out
 
 

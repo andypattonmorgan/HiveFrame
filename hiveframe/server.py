@@ -6,8 +6,10 @@ reach, it will need keychain access later, and file:// blocks fetch.
 
 Bound to 127.0.0.1. There is no auth because there is no network exposure.
 
-What it writes, and what it does not. Every production system stays read-only;
-nothing here calls Jira, ServiceNow, Concerto, Confluence or PMDW at all. The
+What it writes, and what it does not. Every production system stays read-only.
+One of them is now reachable from here: Confluence, through GET-only reads in
+hiveframe/confluence.py, so a project can cite the page of record instead of a
+local copy of it. Nothing here calls Jira, ServiceNow, Concerto or PMDW. The
 writes are all local files: project TOMLs in the store, the decision and inbox
 logs, and a file opened through the preview pane, which is fenced to the folders
 this board already declares. A previous version of this docstring said
@@ -41,6 +43,8 @@ from .verdict import VerdictError, capture, read_log, record_verdict
 from . import edit as edits
 from . import carry as carrymod
 from . import chat as chatmod
+from . import confluence as confmod
+from .confluence import ConfluenceError
 from .carry import CarryError
 from .chat import ChatError
 from .edit import EditError
@@ -156,7 +160,9 @@ def board_payload(stores: tuple[str, ...], weekly_hours: float) -> dict:
             "horizon": p.horizon,
             "status": p.status,
             "store": p.store,
-            "folders": [{"label": lb, "path": pt} for lb, pt in p.folders],
+            "folders": [{"label": lb, "path": pt, "mode": md}
+                        for lb, pt, md in p.folder_roots],
+            "home": p.home_folder or "",
             "score": round(pts, 1),
             "why": why,
             "next_move": ({"id": nxt.id, "title": nxt.title,
@@ -361,11 +367,13 @@ class Handler(BaseHTTPRequestHandler):
             if not wanted:
                 raise StoreError(f"unknown project: {project_id}")
             p = wanted[0]
-            for label, folder in p.folders:
+            for label, folder, mode in p.folder_roots:
                 path = Path(folder).expanduser()
                 roots.append({
                     "label": label,
                     "path": str(path),
+                    "mode": mode,
+                    "writable": mode == "home",
                     "exists": path.exists(),
                     "tree": self._tree_node(path),
                 })
@@ -374,14 +382,18 @@ class Handler(BaseHTTPRequestHandler):
                     roots.append({
                         "label": "Project file",
                         "path": str(p.source_file),
+                        "mode": "store",
+                        "writable": False,
                         "exists": Path(p.source_file).exists(),
                         "tree": self._tree_node(Path(p.source_file)),
                     })
-                note = ("No folder declared for this project. Add "
-                        'folder = "/path/..." under [project], or an artifact '
-                        "whose path is a directory.")
+                note = ("No home folder set for this project. Use Set home in "
+                        "the workbench header to name the directory this "
+                        "project works in, or Link folder to point at one for "
+                        "reference.")
             return {"generated": date.today().isoformat(),
-                    "project": p.id, "roots": roots, "note": note}
+                    "project": p.id, "roots": roots, "note": note,
+                    "home": p.home_folder or ""}
 
         if scope in ("all", "work"):
             root = board.root_for("work")
@@ -428,6 +440,30 @@ class Handler(BaseHTTPRequestHandler):
                     continue
         return out
 
+    def _linked_roots(self, board: Board) -> list[Path]:
+        """Every folder a project points at for reference.
+
+        These are readable and never writable. A link is a pointer, so the
+        editor and the importer both refuse to land inside one.
+        """
+        out: list[Path] = []
+        for p in board.load(tuple(board.roots)):
+            for _label, folder, mode in p.folder_roots:
+                if mode != "linked":
+                    continue
+                try:
+                    out.append(Path(folder).expanduser().resolve())
+                except OSError:
+                    continue
+        return out
+
+    def _refuse_if_linked(self, board: Board, path: Path) -> None:
+        for root in self._linked_roots(board):
+            if path == root or root in path.parents:
+                raise StoreError("that folder is linked for reference and is "
+                                 "read-only. Import into the project home "
+                                 "instead.")
+
     def _resolve_in_roots(self, board: Board, target: str) -> tuple[Path, Path]:
         """Resolve a requested path, or refuse it.
 
@@ -448,11 +484,18 @@ class Handler(BaseHTTPRequestHandler):
         raise StoreError("path is outside every project folder on this board")
 
     def _project_root(self, project) -> Path:
-        if project.folders:
-            return Path(project.folders[0][1]).expanduser().resolve()
+        """Where this project writes. The home, or nowhere.
+
+        A linked folder is never a write target, so it is not considered here
+        even when it is the only folder the project browses.
+        """
+        home = project.home_folder
+        if home:
+            return Path(home).expanduser().resolve()
         if project.source_file is not None:
             return Path(project.source_file).expanduser().resolve().parent
-        raise StoreError("this project has no folder to hold imported files")
+        raise StoreError("this project has no home folder to hold imported "
+                         "files. Set home first.")
 
     def _unique_path(self, path: Path) -> Path:
         if not path.exists():
@@ -699,6 +742,33 @@ class Handler(BaseHTTPRequestHandler):
             subprocess.run(["/usr/bin/open", "-R", str(p)], check=False)
             return self._json({"ok": True})
 
+        if u.path == "/api/pickfolder":
+            # A native folder chooser, because the browser has none. An
+            # <input webkitdirectory> is an upload control: it enumerates every
+            # file in the folder and never reveals an absolute path, which is
+            # the one thing naming a folder requires. The server is local, so it
+            # can ask macOS instead. This only reads a path back; nothing is
+            # opened, moved or copied.
+            prompt = q.get("prompt", ["Choose a folder"])[0]
+            start = q.get("start", [""])[0]
+            script = ('set theFolder to choose folder with prompt "'
+                      + prompt.replace('"', "'") + '"')
+            if start:
+                sp = Path(start).expanduser()
+                if sp.is_dir():
+                    script += ' default location POSIX file "' + str(sp) + '"'
+            script += "\nPOSIX path of theFolder"
+            try:
+                r = subprocess.run(["/usr/bin/osascript", "-e", script],
+                                   capture_output=True, text=True, timeout=300)
+            except subprocess.TimeoutExpired:
+                return self._json({"ok": False, "error": "the folder chooser timed out"}, 400)
+            path = (r.stdout or "").strip().rstrip("/")
+            if r.returncode != 0 or not path:
+                # Cancelling is a normal outcome, not an error to shout about.
+                return self._json({"ok": False, "cancelled": True})
+            return self._json({"ok": True, "path": path})
+
         if u.path == "/api/carry":
             try:
                 items = carrymod.parse()
@@ -824,6 +894,35 @@ class Handler(BaseHTTPRequestHandler):
                 "transcript": chatmod.read_transcript(root, project),
             })
 
+        # ---- Confluence, read only ----------------------------------
+        # Three GETs against the system of record. The client module has no
+        # write verb at all, so nothing typed here can change a page.
+
+        if u.path == "/api/confluence/state":
+            check = q.get("check", ["0"])[0] not in ("0", "", "false")
+            return self._json(confmod.state(check=check))
+
+        if u.path == "/api/confluence/search":
+            try:
+                rows = confmod.search(q.get("q", [""])[0],
+                                      q.get("space", [""])[0],
+                                      int(q.get("limit", ["15"])[0] or 15))
+            except (ConfluenceError, ValueError) as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"base": confmod.BASE, "results": rows})
+
+        if u.path == "/api/confluence/page":
+            try:
+                return self._json(confmod.page(q.get("id", [""])[0]))
+            except ConfluenceError as e:
+                return self._json({"error": str(e)}, 400)
+
+        if u.path == "/api/confluence/spaces":
+            try:
+                return self._json({"spaces": confmod.spaces()})
+            except ConfluenceError as e:
+                return self._json({"error": str(e)}, 400)
+
         if u.path.startswith("/static/"):
             return self._file(WEB / u.path[len("/static/"):])
 
@@ -886,6 +985,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 400)
             if not path.is_file():
                 return self._json({"error": "not a file"}, 404)
+            try:
+                self._refuse_if_linked(board, path)
+            except StoreError as e:
+                return self._json({"error": str(e)}, 400)
             if path.suffix.lower() not in EDITABLE_SUFFIXES:
                 return self._json({"error": "not a file type HiveFrame edits"}, 400)
             text = data.get("text")
@@ -931,11 +1034,21 @@ class Handler(BaseHTTPRequestHandler):
 
         self._json({"error": "not found"}, 404)
 
-    def _chat_dirs(self, root):
+    def _chat_dirs(self, board, store, root, project_id=""):
         dirs = [root]
         repo = Path(__file__).resolve().parent.parent
         if repo not in dirs:
             dirs.append(repo)
+        if project_id:
+            wanted = next((p for p in board.load((store,)) if p.id == project_id), None)
+            if wanted is not None:
+                for _label, folder in wanted.folders:
+                    try:
+                        path = Path(folder).expanduser().resolve()
+                    except OSError:
+                        continue
+                    if path not in dirs:
+                        dirs.append(path)
         return tuple(dirs)
 
     def _chat_stream(self, board, store, root, data):
@@ -956,7 +1069,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             for ev in chatmod.ask_stream(data.get("prompt", ""), root,
-                                         dirs=self._chat_dirs(root),
+                                         dirs=self._chat_dirs(board, store, root, project),
                                          model=data.get("model", ""),
                                          context=data.get("context", ""),
                                          project=project):
@@ -983,7 +1096,7 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             answer = chatmod.ask(data.get("prompt", ""), root,
-                                 dirs=self._chat_dirs(root),
+                                 dirs=self._chat_dirs(board, store, root, project),
                                  model=data.get("model", ""),
                                  context=data.get("context", ""),
                                  project=project)
@@ -1010,6 +1123,7 @@ class Handler(BaseHTTPRequestHandler):
                                   tool_usage(tools, projects))
             elif action in {
                 "project", "charter", "task.add", "task.edit", "task.drop",
+                "task.reopen",
                 "artifact.add", "file.import", "project.file.add",
                 "project.file.remove", "task.file.add", "task.file.remove",
                 "file.remove", "relation.add", "relation.verdict", "uses",
@@ -1054,8 +1168,18 @@ class Handler(BaseHTTPRequestHandler):
                 edits.edit_task(p, data.get("task", ""), payload)
             elif action == "task.drop":
                 edits.drop_task(p, data.get("task", ""), data.get("reason", ""))
+            elif action == "task.reopen":
+                edits.reopen_task(p, data.get("task", ""), data.get("reason", ""))
             elif action == "artifact.add":
                 edits.add_artifact(p, payload)
+            elif action == "project.home.set":
+                edits.set_home(p, payload or data)
+            elif action == "project.home.clear":
+                edits.clear_home(p)
+            elif action == "folder.link":
+                edits.link_folder(p, payload or data)
+            elif action == "folder.unlink":
+                edits.unlink_folder(p, payload or data)
             elif action in ("project.file.add", "file.import"):
                 files = data.get("files") or payload.get("files") or []
                 if not files:
@@ -1111,6 +1235,13 @@ def selftest() -> int:
     print("HiveFrame selftest")
     board = Board.from_env()
     print(f"  roots: { {k: str(v) for k, v in board.roots.items()} }")
+
+    problems = board.check()
+    if problems:
+        for line in problems:
+            print(f"  FAIL {line}")
+        return 1
+    print("  every configured store root exists")
 
     projects = board.load(("work",))
     print(f"  loaded {len(projects)} work project(s)")
@@ -1188,11 +1319,23 @@ def selftest() -> int:
     print("  md() always consumes a line, so a partial table cannot hang the tab")
 
     # A block must not demote a project that still has a move available.
-    probe = replace(projects[0], status="blocked")
-    if probe.actionable_tasks and score(probe)[0] <= score(projects[0])[0]:
-        print("  FAIL: blocking a project with an available move lowered its rank")
-        return 1
-    print("  blocked with a move available ranks above the same project unblocked")
+    #
+    # The probe has to be a project the scorer actually ranks. Some kinds are
+    # exempt on purpose: routine running work scores a flat 0 whatever its
+    # status, so blocking it changes nothing and the comparison below reads
+    # that as a failure. This once picked projects[0] and broke the moment a
+    # routine project sorted first alphabetically.
+    probe_src = next((p for p in projects
+                      if p.actionable_tasks and score(p)[0] > 0), None)
+    if probe_src is None:
+        print("  skipped: no ranked project with an available move to probe")
+    else:
+        probe = replace(probe_src, status="blocked")
+        if score(probe)[0] <= score(probe_src)[0]:
+            print(f"  FAIL: blocking {probe_src.id}, which has an available "
+                  f"move, did not raise its rank")
+            return 1
+        print("  blocked with a move available ranks above the same project unblocked")
 
     # Ranking has to separate. A board where everything scores the same is a
     # list, and a list is what the tool exists to replace.
@@ -1372,6 +1515,22 @@ def main() -> int:
         return selftest()
 
     Handler.weekly_hours = args.weekly_hours
+
+    # Refuse to serve a board we cannot read. A missing store root used to be
+    # skipped, so the server answered 200 with zero projects and it looked like
+    # the data was gone. Say which path is wrong, and say it before binding.
+    try:
+        problems = Board.from_env().check()
+    except StoreError as e:
+        print(f"store configuration error: {e}", file=sys.stderr)
+        return 2
+    if problems:
+        for line in problems:
+            print(f"store configuration error: {line}", file=sys.stderr)
+        print("Not starting. An empty board and a wrong path look identical "
+              "once served.", file=sys.stderr)
+        return 2
+
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"HiveFrame on http://127.0.0.1:{args.port}")
     print(f"  weekly budget: {args.weekly_hours}h")
